@@ -1,0 +1,222 @@
+ --------------------------------------------------- 
+ ---------------Start D-DABIC V1.3----------- 
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 0
+ stepLength = 1
+ rms = 10.9345
+ dataMisfit = 315645
+ modelRoughness = 5484.59
+ modelNorm = 220337
+ objectFunctionalCur = 5.51616e+07
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 10;  step_size: 1;  obj_func: 118530;  rms: 5.91547;  rms_u: 6.70184;  m_updated: 0.193113;  ABIC: 17596.6
+ # Trade-off: 100;  step_size: 1;  obj_func: 119879;  rms: 6.68109;  rms_u: 6.73986;  m_updated: 0.104294;  ABIC: 17577.5
+ # Trade-off: 1870.77;  step_size: 1;  obj_func: 119295;  rms: 6.72197;  rms_u: 6.72343;  m_updated: 0.105883;  ABIC: 17563.7
+ # Trade-off: 12804.1;  step_size: 1;  obj_func: 231536;  rms: 9.36499;  rms_u: 9.36677;  m_updated: 0.560417;  ABIC: 19313.6
+ # ...Finding minimum by Brent's minimizing method...
+ # Minimum ABIC from fminbrent is at trade-off parameter = 1870.77
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 1
+ stepLength = 1
+ Tradeoffparameter = 1870.77
+ rms = 6.72197
+ dataMisfit = 119288
+ modelRoughness = 1.80948e-06
+ modelNorm = 217823
+ modelUpdatedmean = 0.105883
+ ABIC = 17563.7
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 187.077;  step_size: 1;  obj_func: 115939;  rms: 6.60573;  rms_u: 6.62819;  m_updated: 0.0729611;  ABIC: 17489.5
+ # Trade-off: 1870.77;  step_size: 1;  obj_func: 116823;  rms: 6.65193;  rms_u: 6.65341;  m_updated: 0.0732082;  ABIC: 17509
+ # Trade-off: 10;  step_size: 1;  obj_func: 69622.2;  rms: 4.30368;  rms_u: 5.13635;  m_updated: 0.152835;  ABIC: 16230.1
+ # Trade-off: 0.240972;  step_size: 1;  obj_func: 179754;  rms: 8.23804;  rms_u: 8.25315;  m_updated: 0.234621;  ABIC: 20267.4
+ # ...Finding minimum by Brent's minimizing method...
+ # Trade-off: 2.40972;  step_size: 1;  obj_func: 84663.1;  rms: 5.38801;  rms_u: 5.66405;  m_updated: 0.184352;  ABIC: 17037.6
+ # Trade-off: 30.6103;  step_size: 1;  obj_func: 96681.9;  rms: 5.66515;  rms_u: 6.05275;  m_updated: 0.105955;  ABIC: 17025.5
+ # Trade-off: 6.30957;  step_size: 1;  obj_func: 70213.3;  rms: 4.42766;  rms_u: 5.1581;  m_updated: 0.167497;  ABIC: 16316.6
+ # Trade-off: 15.8489;  step_size: 1;  obj_func: 77968.5;  rms: 4.74416;  rms_u: 5.4355;  m_updated: 0.134726;  ABIC: 16487.8
+ # Minimum ABIC from fminbrent is at trade-off parameter = 10
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 2
+ stepLength = 1
+ Tradeoffparameter = 10
+ rms = 4.30368
+ dataMisfit = 48897.1
+ modelRoughness = 207.251
+ modelNorm = 247889
+ modelUpdatedmean = 0.152835
+ ABIC = 16230.1
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 1;  step_size: 1;  obj_func: 12953;  rms: 2.04329;  rms_u: 2.21547;  m_updated: 0.109146;  ABIC: 12477.2
+ # Trade-off: 10;  step_size: 1;  obj_func: 53539.6;  rms: 3.66565;  rms_u: 4.5042;  m_updated: 0.0443654;  ABIC: 15537.1
+ # Trade-off: 0.053454;  step_size: 1;  obj_func: 233933;  rms: 9.41068;  rms_u: 9.41512;  m_updated: 0.448722;  ABIC: 22743.8
+ # ...Finding minimum by Brent's minimizing method...
+ # Trade-off: 0.326687;  step_size: 1;  obj_func: 21399;  rms: 2.81441;  rms_u: 2.84759;  m_updated: 0.168325;  ABIC: 14537.8
+ # Trade-off: 2.40972;  step_size: 1;  obj_func: 14459.9;  rms: 1.80627;  rms_u: 2.3408;  m_updated: 0.0844819;  ABIC: 12392
+ # Trade-off: 1.64092;  step_size: 1;  obj_func: 12731.1;  rms: 1.85697;  rms_u: 2.19641;  m_updated: 0.0931298;  ABIC: 12200
+ # Trade-off: 1.48617;  step_size: 1;  obj_func: 12591.2;  rms: 1.88599;  rms_u: 2.1843;  m_updated: 0.0955754;  ABIC: 12212.9
+ # Trade-off: 1.81177;  step_size: 1;  obj_func: 12983.3;  rms: 1.8335;  rms_u: 2.21806;  m_updated: 0.0908146;  ABIC: 12211.8
+ # Minimum ABIC from fminbrent is at trade-off parameter = 1.64092
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 3
+ stepLength = 1
+ Tradeoffparameter = 1.64092
+ rms = 1.85697
+ dataMisfit = 9103.64
+ modelRoughness = 1347.19
+ modelNorm = 250514
+ modelUpdatedmean = 0.0931298
+ ABIC = 12200
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 0.164092;  step_size: 1;  obj_func: 22304.5;  rms: 2.89648;  rms_u: 2.90721;  m_updated: 0.158321;  ABIC: 15367.4
+ # Trade-off: 1.64092;  step_size: 1;  obj_func: 12514.1;  rms: 1.95444;  rms_u: 2.17761;  m_updated: 0.0588345;  ABIC: 12200.7
+ # Trade-off: 30.6977;  step_size: 1;  obj_func: 100857;  rms: 5.74261;  rms_u: 6.18207;  m_updated: 0.129805;  ABIC: 17139.6
+ # ...Finding minimum by Brent's minimizing method...
+ # Trade-off: 5.0229;  step_size: 1;  obj_func: 34929.9;  rms: 3.12268;  rms_u: 3.63814;  m_updated: 0.0732881;  ABIC: 14545.3
+ # Trade-off: 0.680958;  step_size: 1;  obj_func: 7400.51;  rms: 1.58582;  rms_u: 1.6746;  m_updated: 0.0844646;  ABIC: 11281.2
+ # Trade-off: 0.391035;  step_size: 1;  obj_func: 7728.41;  rms: 1.66962;  rms_u: 1.7113;  m_updated: 0.107225;  ABIC: 11786.8
+ # Trade-off: 0.735354;  step_size: 1;  obj_func: 7552.58;  rms: 1.59406;  rms_u: 1.69172;  m_updated: 0.0815299;  ABIC: 11286.9
+ # Trade-off: 0.630586;  step_size: 1;  obj_func: 7292.17;  rms: 1.58179;  rms_u: 1.6623;  m_updated: 0.0874581;  ABIC: 11291.7
+ # Minimum ABIC from fminbrent is at trade-off parameter = 0.680958
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 4
+ stepLength = 1
+ Tradeoffparameter = 0.680958
+ rms = 1.58582
+ dataMisfit = 6639.15
+ modelRoughness = 1641.9
+ modelNorm = 239842
+ modelUpdatedmean = 0.0844646
+ ABIC = 11281.2
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 0.0680958;  step_size: 1;  obj_func: 129513;  rms: 7.00174;  rms_u: 7.00547;  m_updated: 0.281117;  ABIC: 21072.6
+ # Trade-off: 0.680958;  step_size: 1;  obj_func: 6025.28;  rms: 1.42018;  rms_u: 1.51102;  m_updated: 0.0499928;  ABIC: 10743.3
+ # Trade-off: 12.7391;  step_size: 1;  obj_func: 62906.2;  rms: 3.91333;  rms_u: 4.88233;  m_updated: 0.120308;  ABIC: 15948.5
+ # ...Finding minimum by Brent's minimizing method...
+ # Trade-off: 2.08444;  step_size: 1;  obj_func: 10484.5;  rms: 1.57026;  rms_u: 1.99321;  m_updated: 0.0685607;  ABIC: 11637.4
+ # Trade-off: 0.282588;  step_size: 1;  obj_func: 8563.07;  rms: 1.77844;  rms_u: 1.80134;  m_updated: 0.0733617;  ABIC: 12336.9
+ # Trade-off: 0.877495;  step_size: 1;  obj_func: 6424.46;  rms: 1.42858;  rms_u: 1.56027;  m_updated: 0.0520145;  ABIC: 10758.5
+ # Trade-off: 0.746297;  step_size: 1;  obj_func: 6136.06;  rms: 1.42088;  rms_u: 1.52484;  m_updated: 0.050396;  ABIC: 10733.9
+ # Trade-off: 0.791278;  step_size: 1;  obj_func: 6227;  rms: 1.42283;  rms_u: 1.5361;  m_updated: 0.0508565;  ABIC: 10737.1
+ # Minimum ABIC from fminbrent is at trade-off parameter = 0.746297
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 5
+ stepLength = 1
+ Tradeoffparameter = 0.746297
+ rms = 1.42088
+ dataMisfit = 5329.91
+ modelRoughness = 1447.4
+ modelNorm = 245335
+ modelUpdatedmean = 0.050396
+ ABIC = 10733.9
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 0.0746297;  step_size: 1;  obj_func: 99942.3;  rms: 6.15022;  rms_u: 6.15396;  m_updated: 0.245367;  ABIC: 20289.3
+ # Trade-off: 0.746297;  step_size: 1;  obj_func: 7910.32;  rms: 1.64153;  rms_u: 1.73132;  m_updated: 0.0287282;  ABIC: 11423.8
+ # Trade-off: 13.9615;  step_size: 1;  obj_func: 70691.8;  rms: 4.29296;  rms_u: 5.17565;  m_updated: 0.112955;  ABIC: 16251.5
+ # ...Finding minimum by Brent's minimizing method...
+ # Trade-off: 2.28444;  step_size: 1;  obj_func: 13008.8;  rms: 1.80098;  rms_u: 2.22023;  m_updated: 0.0509489;  ABIC: 12186.4
+ # Trade-off: 0.309703;  step_size: 1;  obj_func: 8106.68;  rms: 1.72809;  rms_u: 1.75268;  m_updated: 0.0567443;  ABIC: 12134.6
+ # Trade-off: 0.826635;  step_size: 1;  obj_func: 8037.98;  rms: 1.64023;  rms_u: 1.74523;  m_updated: 0.0289388;  ABIC: 11404
+ # Trade-off: 0.917149;  step_size: 1;  obj_func: 8202.78;  rms: 1.64001;  rms_u: 1.76303;  m_updated: 0.0301176;  ABIC: 11397.1
+ # Trade-off: 0.933151;  step_size: 1;  obj_func: 8234.2;  rms: 1.64011;  rms_u: 1.76641;  m_updated: 0.0303799;  ABIC: 11397.3
+ # Trade-off: 0.901421;  step_size: 1;  obj_func: 8172.56;  rms: 1.63995;  rms_u: 1.75978;  m_updated: 0.0298717;  ABIC: 11397.2
+ # Minimum ABIC from fminbrent is at trade-off parameter = 0.917149
+ # m_dataMisfitPre: 1.42088  <  m_dataMisfitCur: 1.64001
+ # m_abicPre: 10733.9  <  m_abicCur: 11397.1
+ # Cutting the stepsize and re-searching 
+ # ...... 
+ # ...Bracketing Minimum...
+ # Trade-off: 0.0746297;  step_size: 0.5;  obj_func: 14363.2;  rms: 2.33025;  rms_u: 2.33295;  m_updated: 0.122684;  ABIC: 15167.9
+ # Trade-off: 0.746297;  step_size: 0.5;  obj_func: 4826.43;  rms: 1.24215;  rms_u: 1.35236;  m_updated: 0.0143641;  ABIC: 10119.5
+ # Trade-off: 13.9615;  step_size: 0.5;  obj_func: 117026;  rms: 2.50765;  rms_u: 6.65918;  m_updated: 0.0564777;  ABIC: 17582.2
+ # ...Finding minimum by Brent's minimizing method...
+ # Trade-off: 2.28444;  step_size: 0.5;  obj_func: 10123.5;  rms: 1.33565;  rms_u: 1.9586;  m_updated: 0.0254744;  ABIC: 11524.3
+ # Trade-off: 0.309703;  step_size: 0.5;  obj_func: 4242.47;  rms: 1.24339;  rms_u: 1.26791;  m_updated: 0.0283721;  ABIC: 10425.1
+ # Trade-off: 0.596981;  step_size: 0.5;  obj_func: 4548.58;  rms: 1.23755;  rms_u: 1.31286;  m_updated: 0.0158448;  ABIC: 10107.6
+ # Trade-off: 0.538459;  step_size: 0.5;  obj_func: 4455.07;  rms: 1.23621;  rms_u: 1.29929;  m_updated: 0.0171027;  ABIC: 10123.9
+ # Trade-off: 0.661863;  step_size: 0.5;  obj_func: 4662.81;  rms: 1.23939;  rms_u: 1.32924;  m_updated: 0.0149115;  ABIC: 10104.7
+ # Minimum ABIC from fminbrent is at trade-off parameter = 0.661863
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 6
+ stepLength = 0.5
+ Tradeoffparameter = 0.661863
+ rms = 1.23939
+ dataMisfit = 4055.27
+ modelRoughness = 1386.87
+ modelNorm = 245901
+ modelUpdatedmean = 0.0149115
+ ABIC = 10104.7
+ --------------------------------------------------- 
+ # Entering ABIC (Difference Filter).
+ # Searching for the trade-off parameter that minimizes ABIC
+ # ...Bracketing Minimum...
+ # Trade-off: 0.0661863;  step_size: 0.75;  obj_func: 49134;  rms: 4.31187;  rms_u: 4.31491;  m_updated: 0.201163;  ABIC: 18550.2
+ # Trade-off: 0.661863;  step_size: 0.75;  obj_func: 3067.27;  rms: 0.948847;  rms_u: 1.07809;  m_updated: 0.0153367;  ABIC: 8985.74
+ # Trade-off: 12.3819;  step_size: 0.75;  obj_func: 69777.1;  rms: 3.08106;  rms_u: 5.14205;  m_updated: 0.0805058;  ABIC: 16226.3
+ # Finding Intercept: bracketing the root (RMS - m_tolreq = 0)...
+ # Trade-off: 0.661863;  step_size: 0.375;  obj_func: 3616.71;  rms: 1.06106;  rms_u: 1.17068;  m_updated: 0.00766833;  ABIC: 9420.75
+ # Finding Intercept: approaching the root (RMS - m_tolreq = 0)...
+ # Trade-off: 0.661863;  step_size: 0.579053;  obj_func: 3258.92;  rms: 0.990589;  rms_u: 1.11126;  m_updated: 0.011841;  ABIC: 9145.74
+ # Trade-off: 0.661863;  step_size: 0.529053;  obj_func: 3333.33;  rms: 1.00586;  rms_u: 1.12388;  m_updated: 0.0108185;  ABIC: 9205.34
+ # Tolerance is met (approximately) at trade-off parameter  = 0.661863  with step_size = 0.529053
+ --------------------------------------------------- 
+ Rough outcomes of current iteration: 
+ iterCur = 7
+ stepLength = 0.529053
+ Tradeoffparameter = 0.661863
+ rms = 1.00586
+ dataMisfit = 2671.06
+ modelRoughness = 1511.81
+ modelNorm = 247926
+ modelUpdatedmean = 0.0108185
+ ABIC = 9205.34
+ --------------------------------------------------- 
+# Tolerance met. Leaving ABIC.
+	Command being timed: "mpiexec -n 10 /share/home/u15018/sh25/src/femtic-song/femtic-DABICv1.3/femtic-dabic"
+	User time (seconds): 0.01
+	System time (seconds): 0.04
+	Percent of CPU this job got: 0%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 25:21.48
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 8508
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2
+	Minor (reclaiming a frame) page faults: 1722
+	Voluntary context switches: 319
+	Involuntary context switches: 83
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
