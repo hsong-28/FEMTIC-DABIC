@@ -11,6 +11,8 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 ## Release note
 
+***v1.3.1*** Dec. 27, 2025: I’ve made a minor adjustment： specifically, the step size of the Brent line search has been reduced to ensure a more accurate search for the minimum value of DABIC. Meanwhile, since the statistically optimal (*α*) do not differ significantly between adjacent iterations, this also reduces the number of searches and improves inversion efficiency.
+
 ***v1.3*** Sep. 13, 2025: Added Minimum Norm (MN) Stabilizer with Depth of Investigation (DOI) Support. Introduced a new regularization option (|m - m_r|) to constrain inversion toward a reference model (m_r); the primary purpose of this option (for now) is to enable DOI analysis for model appraisal.
 
 ***v1.2*** Sep. 11, 2025: Reference Model (m_r) Configuration Option. Added support for defining a user-provided reference model (m_r), enabling physics-based constraints in the inversion.
