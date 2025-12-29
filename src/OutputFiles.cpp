@@ -212,13 +212,13 @@ void OutputFiles::openCnvFile(const int iterNum) {
 			OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
 				<< std::setw(15) << "Alpha"
 				<< std::setw(15) << "Beta"
-				<< std::setw(15) << "Gamma"
 				<< std::setw(15) << "Damp"
 				<< std::setw(15) << "Roughness"
 				<< std::setw(15) << "Distortion"
-				<< std::setw(15) << "CrossGrad"
 				<< std::setw(15) << "Misfit"
 				<< std::setw(15) << "RMS"
+				<< std::setw(15) << "MupdateMean"
+				<< std::setw(15) << "ABIC"				
 				<< std::setw(15) << "ObjFunc"
 				<< std::endl;
 
@@ -229,14 +229,14 @@ void OutputFiles::openCnvFile(const int iterNum) {
 				<< std::setw(15) << "Alpha"
 				<< std::setw(15) << "Beta1"
 				<< std::setw(15) << "Beta2"
-				<< std::setw(15) << "Gamma"
 				<< std::setw(15) << "Damp"
 				<< std::setw(15) << "Roughness"
 				<< std::setw(15) << "Gain"
 				<< std::setw(15) << "Rotation"
-				<< std::setw(15) << "CrossGrad"
 				<< std::setw(15) << "Misfit"
 				<< std::setw(15) << "RMS"
+				<< std::setw(15) << "MupdateMean"
+				<< std::setw(15) << "ABIC"	
 				<< std::setw(15) << "ObjFunc"
 				<< std::endl;
 
@@ -245,13 +245,13 @@ void OutputFiles::openCnvFile(const int iterNum) {
 			OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
 				<< std::setw(15) << "Alpha"
 				<< std::setw(15) << "Beta"
-				<< std::setw(15) << "Gamma"
 				<< std::setw(15) << "Damp"
 				<< std::setw(15) << "Roughness"
 				<< std::setw(15) << "Gain"
-				<< std::setw(15) << "CrossGrad"
 				<< std::setw(15) << "Misfit"
 				<< std::setw(15) << "RMS"
+				<< std::setw(15) << "MupdateMean"
+				<< std::setw(15) << "ABIC"	
 				<< std::setw(15) << "ObjFunc"
 				<< std::endl;
 

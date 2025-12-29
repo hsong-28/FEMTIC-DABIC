@@ -3074,6 +3074,7 @@ std::vector<double> AnalysisControl::fminbrentABIC()
 			x = u;
 			fx = fu;
 			ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+
 		}
 		else
 		{
@@ -3098,7 +3099,7 @@ std::vector<double> AnalysisControl::fminbrentABIC()
 	}
 
 	// If maximum iterations are reached, warn the user
-	std::cerr << "Warning: Maximum iterations exceeded in fminocc" << std::endl;
+	std::cerr << "Warning: Maximum iterations exceeded in fminbrentABIC" << std::endl;
 	m_tradeOffParameterForResistivityValue = pow(10.0, x);
 	return fx; // Return the best found value
 }
@@ -3245,6 +3246,8 @@ AnalysisControl::ConvergenceBehaviors AnalysisControl::adjustStepLengthDampingFa
 									   << std::setw(15) << std::scientific << distortionMatrixNorm
 									   << std::setw(15) << std::scientific << dataMisfit
 									   << std::setw(15) << std::scientific << rms
+									   << std::setw(15) << std::scientific << m_updatedmean
+									   << std::setw(15) << std::scientific << m_abic[0]									   
 									   << std::setw(15) << std::scientific << objectFunctionalCur
 									   << std::endl;
 			}
@@ -3266,6 +3269,8 @@ AnalysisControl::ConvergenceBehaviors AnalysisControl::adjustStepLengthDampingFa
 									   << std::setw(15) << std::scientific << normOfRotations
 									   << std::setw(15) << std::scientific << dataMisfit
 									   << std::setw(15) << std::scientific << rms
+									   << std::setw(15) << std::scientific << m_updatedmean
+									   << std::setw(15) << std::scientific << m_abic[0]	
 									   << std::setw(15) << std::scientific << objectFunctionalCur
 									   << std::endl;
 			}
@@ -3283,6 +3288,8 @@ AnalysisControl::ConvergenceBehaviors AnalysisControl::adjustStepLengthDampingFa
 									   << std::setw(15) << std::scientific << normOfGains
 									   << std::setw(15) << std::scientific << dataMisfit
 									   << std::setw(15) << std::scientific << rms
+									   << std::setw(15) << std::scientific << m_updatedmean
+									   << std::setw(15) << std::scientific << m_abic[0]	
 									   << std::setw(15) << std::scientific << objectFunctionalCur
 									   << std::endl;
 			}
