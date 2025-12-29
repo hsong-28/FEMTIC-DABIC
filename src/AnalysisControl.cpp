@@ -243,7 +243,7 @@ void AnalysisControl::run()
 	if (myProcessID == 0)
 	{
 		std::cout << " --------------------------------------------------- " << std::endl;
-		std::cout << " ---------------Start D-DABIC V1.4----------- " << std::endl;
+		std::cout << " ---------------Start D-DABIC V1.3----------- " << std::endl;
 	}
 
 	//-------------------------------------------------------
@@ -297,8 +297,9 @@ void AnalysisControl::run()
 	OutputFiles::m_logFile << "# Read data of resisitivity block model ." << outputElapsedTime() << std::endl;
 	ResistivityBlock *pResistivityBlock = ResistivityBlock::getInstance();
 	pResistivityBlock->inputResisitivityBlock();
-	
-	if(m_MinNormInv){
+
+	if (m_MinNormInv)
+	{
 		OutputFiles::m_logFile << "# Read reference model ." << outputElapsedTime() << std::endl;
 		pResistivityBlock->inputReferenceModel();
 	}
@@ -554,11 +555,12 @@ void AnalysisControl::run()
 				{
 					if (myProcessID == 0)
 					{
-						if(m_MinNormInv && m_tradeOffParameterForMinNorm > CommonParameters::EPS)
+						if (m_MinNormInv && m_tradeOffParameterForMinNorm > CommonParameters::EPS)
 						{
 							std::cout << " # Entering ABIC (Difference Filter with Minimum Norm (MN) Stabilizer)." << std::endl;
 						}
-						else{
+						else
+						{
 							std::cout << " # Entering ABIC (Difference Filter)." << std::endl;
 						}
 						std::cout << " # Searching for the trade-off parameter that minimizes ABIC" << std::endl;
@@ -742,12 +744,15 @@ void AnalysisControl::run()
 			{
 				if (myProcessID == 0)
 				{
-					if(m_MinNormInv){
+					if (m_MinNormInv)
+					{
 						std::cout << " # Entering ABIC (Laplacian Filter with Minimum Norm (MN) Stabilizer)." << std::endl;
-					}else{
+					}
+					else
+					{
 						std::cout << " # Entering ABIC (Laplacian Filter)." << std::endl;
 					}
-					
+
 					std::cout << " # Searching for the trade-off parameter that minimizes ABIC" << std::endl;
 				}
 				int numDataThisPE = ptrObservedData->getNumObservedDataThisPETotal();
@@ -3074,7 +3079,6 @@ std::vector<double> AnalysisControl::fminbrentABIC()
 			x = u;
 			fx = fu;
 			ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
-
 		}
 		else
 		{
@@ -3232,80 +3236,158 @@ AnalysisControl::ConvergenceBehaviors AnalysisControl::adjustStepLengthDampingFa
 				exit(1);
 			}
 
-			if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE)
+			if ((AnalysisControl::getInstance())->ABICinversion())
 			{
-				distortionMatrixNorm = pObservedData->calculateSumSquareOfDistortionMatrixComplexity();
-				objectFunctionalCur += m_tradeOffParameterForDistortionMatrixComplexity * m_tradeOffParameterForDistortionMatrixComplexity * distortionMatrixNorm;
+				if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE)
+				{
+					distortionMatrixNorm = pObservedData->calculateSumSquareOfDistortionMatrixComplexity();
+					objectFunctionalCur += m_tradeOffParameterForDistortionMatrixComplexity * m_tradeOffParameterForDistortionMatrixComplexity * distortionMatrixNorm;
 
-				OutputFiles::m_cnvFile.precision(4);
-				OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionMatrixComplexity
-									   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
-									   << std::setw(15) << std::scientific << modelRoughness
-									   << std::setw(15) << std::scientific << distortionMatrixNorm
-									   << std::setw(15) << std::scientific << dataMisfit
-									   << std::setw(15) << std::scientific << rms
-									   << std::setw(15) << std::scientific << m_updatedmean
-									   << std::setw(15) << std::scientific << m_abic[0]									   
-									   << std::setw(15) << std::scientific << objectFunctionalCur
-									   << std::endl;
-			}
-			else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS)
-			{
-				normOfGains = pObservedData->calculateSumSquareOfDistortionMatrixGains();
-				objectFunctionalCur += m_tradeOffParameterForDistortionGain * m_tradeOffParameterForDistortionGain * normOfGains;
-				normOfRotations = pObservedData->calculateSumSquareOfDistortionMatrixRotations();
-				objectFunctionalCur += m_tradeOffParameterForDistortionRotation * m_tradeOffParameterForDistortionRotation * normOfRotations;
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionMatrixComplexity
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << distortionMatrixNorm
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << m_abic[0]
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+				else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS)
+				{
+					normOfGains = pObservedData->calculateSumSquareOfDistortionMatrixGains();
+					objectFunctionalCur += m_tradeOffParameterForDistortionGain * m_tradeOffParameterForDistortionGain * normOfGains;
+					normOfRotations = pObservedData->calculateSumSquareOfDistortionMatrixRotations();
+					objectFunctionalCur += m_tradeOffParameterForDistortionRotation * m_tradeOffParameterForDistortionRotation * normOfRotations;
 
-				OutputFiles::m_cnvFile.precision(4);
-				OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionGain
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionRotation
-									   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
-									   << std::setw(15) << std::scientific << modelRoughness
-									   << std::setw(15) << std::scientific << normOfGains
-									   << std::setw(15) << std::scientific << normOfRotations
-									   << std::setw(15) << std::scientific << dataMisfit
-									   << std::setw(15) << std::scientific << rms
-									   << std::setw(15) << std::scientific << m_updatedmean
-									   << std::setw(15) << std::scientific << m_abic[0]	
-									   << std::setw(15) << std::scientific << objectFunctionalCur
-									   << std::endl;
-			}
-			else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY)
-			{
-				normOfGains = pObservedData->calculateSumSquareOfDistortionMatrixGains();
-				objectFunctionalCur += m_tradeOffParameterForDistortionGain * m_tradeOffParameterForDistortionGain * normOfGains;
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionGain
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionRotation
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << normOfGains
+										   << std::setw(15) << std::scientific << normOfRotations
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << m_abic[0]
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+				else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY)
+				{
+					normOfGains = pObservedData->calculateSumSquareOfDistortionMatrixGains();
+					objectFunctionalCur += m_tradeOffParameterForDistortionGain * m_tradeOffParameterForDistortionGain * normOfGains;
 
-				OutputFiles::m_cnvFile.precision(4);
-				OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionGain
-									   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
-									   << std::setw(15) << std::scientific << modelRoughness
-									   << std::setw(15) << std::scientific << normOfGains
-									   << std::setw(15) << std::scientific << dataMisfit
-									   << std::setw(15) << std::scientific << rms
-									   << std::setw(15) << std::scientific << m_updatedmean
-									   << std::setw(15) << std::scientific << m_abic[0]	
-									   << std::setw(15) << std::scientific << objectFunctionalCur
-									   << std::endl;
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionGain
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << normOfGains
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << m_abic[0]
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+				else
+				{
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << m_abic[0]
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
 			}
 			else
 			{
-				OutputFiles::m_cnvFile.precision(4);
-				OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
-									   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
-									   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
-									   << std::setw(15) << std::scientific << modelRoughness
-									   << std::setw(15) << std::scientific << dataMisfit
-									   << std::setw(15) << std::scientific << rms
-									   << std::setw(15) << std::scientific << m_updatedmean
-									   << std::setw(15) << std::scientific << m_abic[0]
-									   << std::setw(15) << std::scientific << objectFunctionalCur
-									   << std::endl;
+				if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE)
+				{
+					distortionMatrixNorm = pObservedData->calculateSumSquareOfDistortionMatrixComplexity();
+					objectFunctionalCur += m_tradeOffParameterForDistortionMatrixComplexity * m_tradeOffParameterForDistortionMatrixComplexity * distortionMatrixNorm;
+
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionMatrixComplexity
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << distortionMatrixNorm
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+				else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS)
+				{
+					normOfGains = pObservedData->calculateSumSquareOfDistortionMatrixGains();
+					objectFunctionalCur += m_tradeOffParameterForDistortionGain * m_tradeOffParameterForDistortionGain * normOfGains;
+					normOfRotations = pObservedData->calculateSumSquareOfDistortionMatrixRotations();
+					objectFunctionalCur += m_tradeOffParameterForDistortionRotation * m_tradeOffParameterForDistortionRotation * normOfRotations;
+
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionGain
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionRotation
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << normOfGains
+										   << std::setw(15) << std::scientific << normOfRotations
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+				else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY)
+				{
+					normOfGains = pObservedData->calculateSumSquareOfDistortionMatrixGains();
+					objectFunctionalCur += m_tradeOffParameterForDistortionGain * m_tradeOffParameterForDistortionGain * normOfGains;
+
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForDistortionGain
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << normOfGains
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+				else
+				{
+					OutputFiles::m_cnvFile.precision(4);
+					OutputFiles::m_cnvFile << std::setw(10) << iterCur << std::setw(10) << iCutbackCur
+										   << std::setw(15) << std::scientific << m_tradeOffParameterForResistivityValuePre
+										   << std::setw(15) << std::scientific << m_stepLengthDampingFactorCur
+										   << std::setw(15) << std::scientific << modelRoughness
+										   << std::setw(15) << std::scientific << dataMisfit
+										   << std::setw(15) << std::scientific << rms
+										   << std::setw(15) << std::scientific << m_updatedmean
+										   << std::setw(15) << std::scientific << objectFunctionalCur
+										   << std::endl;
+				}
+
 			}
 		}
 

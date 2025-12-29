@@ -196,82 +196,143 @@ void OutputFiles::openCnvFile(const int iterNum) {
 		exit(1);
 	}
 
-	// Dieno2023 (1/1)
-	if (iterNum == 0){
-		OutputFiles::m_cnvFileitr << std::setw(15) << "Retrial#"
-			<< std::setw(15) << "Alpha"
-			<< std::setw(15) << "obj_func"
-			<< std::setw(15) << "dataMisfit"
-			<< std::setw(15) << "modelroughness"
-			<< std::setw(15) << "modelnorm"
-			<< std::setw(15) << "rms"
-			<< std::setw(15) << "rms_obj"
-			<< std::setw(15) << "abic"
-			<< std::endl;
-		if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE) {
-			OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
-				<< std::setw(15) << "Alpha"
-				<< std::setw(15) << "Beta"
-				<< std::setw(15) << "Damp"
-				<< std::setw(15) << "Roughness"
-				<< std::setw(15) << "Distortion"
-				<< std::setw(15) << "Misfit"
-				<< std::setw(15) << "RMS"
-				<< std::setw(15) << "MupdateMean"
-				<< std::setw(15) << "ABIC"				
-				<< std::setw(15) << "ObjFunc"
-				<< std::endl;
+	if (iterNum == 0)
+	{
+		if ((AnalysisControl::getInstance())->ABICinversion())
+		{
+			OutputFiles::m_cnvFileitr << std::setw(15) << "Retrial#"
+									  << std::setw(15) << "Alpha"
+									  << std::setw(15) << "obj_func"
+									  << std::setw(15) << "dataMisfit"
+									  << std::setw(15) << "modelroughness"
+									  << std::setw(15) << "modelnorm"
+									  << std::setw(15) << "rms"
+									  << std::setw(15) << "rms_obj"
+									  << std::setw(15) << "abic"
+									  << std::endl;
+			if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE)
+			{
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Beta"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Distortion"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ABIC"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
+			else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS)
+			{
 
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Beta1"
+									   << std::setw(15) << "Beta2"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Gain"
+									   << std::setw(15) << "Rotation"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ABIC"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
+			else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY)
+			{
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Beta"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Gain"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ABIC"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
+			else
+			{
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ABIC"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
 		}
-		else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS) {
+		else
+		{
+			if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE)
+			{
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Beta"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Distortion"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
+			else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS)
+			{
 
-			OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
-				<< std::setw(15) << "Alpha"
-				<< std::setw(15) << "Beta1"
-				<< std::setw(15) << "Beta2"
-				<< std::setw(15) << "Damp"
-				<< std::setw(15) << "Roughness"
-				<< std::setw(15) << "Gain"
-				<< std::setw(15) << "Rotation"
-				<< std::setw(15) << "Misfit"
-				<< std::setw(15) << "RMS"
-				<< std::setw(15) << "MupdateMean"
-				<< std::setw(15) << "ABIC"	
-				<< std::setw(15) << "ObjFunc"
-				<< std::endl;
-
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Beta1"
+									   << std::setw(15) << "Beta2"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Gain"
+									   << std::setw(15) << "Rotation"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
+			else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY)
+			{
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Beta"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Gain"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
+			else
+			{
+				OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
+									   << std::setw(15) << "Alpha"
+									   << std::setw(15) << "Damp"
+									   << std::setw(15) << "Roughness"
+									   << std::setw(15) << "Misfit"
+									   << std::setw(15) << "RMS"
+									   << std::setw(15) << "MupdateMean"
+									   << std::setw(15) << "ObjFunc"
+									   << std::endl;
+			}
 		}
-		else if ((AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY) {
-			OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
-				<< std::setw(15) << "Alpha"
-				<< std::setw(15) << "Beta"
-				<< std::setw(15) << "Damp"
-				<< std::setw(15) << "Roughness"
-				<< std::setw(15) << "Gain"
-				<< std::setw(15) << "Misfit"
-				<< std::setw(15) << "RMS"
-				<< std::setw(15) << "MupdateMean"
-				<< std::setw(15) << "ABIC"	
-				<< std::setw(15) << "ObjFunc"
-				<< std::endl;
-
-		}
-		else {
-					OutputFiles::m_cnvFile << std::setw(10) << "Iter#" << std::setw(10) << "Retrial#"
-					<< std::setw(15) << "Alpha"
-					<< std::setw(15) << "Damp"
-					<< std::setw(15) << "Roughness"
-					<< std::setw(15) << "Misfit"
-					<< std::setw(15) << "RMS"
-					<< std::setw(15) << "MupdateMean"
-					<< std::setw(15) << "ABIC"
-					<< std::setw(15) << "ObjFunc"
-					<< std::endl;
-			
-
-		}
-}
-	
+	}
 }
 
 
