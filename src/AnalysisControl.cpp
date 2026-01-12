@@ -243,7 +243,7 @@ void AnalysisControl::run()
 	if (myProcessID == 0)
 	{
 		std::cout << " --------------------------------------------------- " << std::endl;
-		std::cout << " ---------------Start D-DABIC V1.3----------- " << std::endl;
+		std::cout << " ---------------Start D-DABIC V1.4.0----------- " << std::endl;
 	}
 
 	//-------------------------------------------------------
@@ -714,7 +714,7 @@ void AnalysisControl::run()
 							m_stepsizeub = m_stepLengthDampingFactorCur;
 							m_ptrInversion->inversionCalculation();
 							m_ABICub = m_ptrInversion->getabic();
-						} // after this loop, m_rmsOCCub >= m_tolreq; m_tradeOffParameterOCCub > m_tradeOffParameterOCClb.
+						} // after this loop, m_ABICub >= m_tolreq; m_tradeOffParameterABICub > m_tradeOffParameterABIClb.
 						if (myProcessID == 0)
 						{
 							std::cout << " # Finding Intercept: approaching the root (RMS - m_tolreq = 0)..." << std::endl;
@@ -728,6 +728,7 @@ void AnalysisControl::run()
 						ptrResistivityBlock->copyPWK2NotFixedToPWK1();
 					}
 					ptrResistivityBlock->copyPWK1NotFixedToResistivityValues();
+					ptrObservedData->copyDistortionParamsPWK1ToCur();
 				}
 				// Delete old out-of-core files
 				m_ptrInversion->deleteOutOfCoreFileAll();
@@ -2703,9 +2704,12 @@ void AnalysisControl::minbrkABIC()
 	double gold = sqrt(1.618034);
 	int myProcessID = getMyPE();
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
+	ObservedData *const ptrObservedData = ObservedData::getInstance();
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterABICB);
 	m_ptrInversion->inversionCalculation();
 	ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+	ptrObservedData->copyDistortionParamsCurToPWK1();
+
 	m_ABICB = m_ptrInversion->getabic();
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterABICA);
 	m_ptrInversion->inversionCalculation();
@@ -2720,6 +2724,8 @@ void AnalysisControl::minbrkABIC()
 		m_ABICA = m_ABICB;
 		m_ABICB = temVec;
 		ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+		ptrObservedData->copyDistortionParamsCurToPWK1();
+
 	} // keep m_ABICB < m_ABICA;
 	m_tradeOffParameterABICC = m_tradeOffParameterABICB + gold * (m_tradeOffParameterABICB - m_tradeOffParameterABICA);
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterABICC);
@@ -2731,6 +2737,7 @@ void AnalysisControl::minbrkABIC()
 	while (m_ABICB[0] > m_ABICC[0])
 	{
 		ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+		ptrObservedData->copyDistortionParamsCurToPWK1();
 		double R = (m_tradeOffParameterABICB - m_tradeOffParameterABICA) * (m_ABICB[0] - m_ABICC[0]);
 		double Q = (m_tradeOffParameterABICB - m_tradeOffParameterABICC) * (m_ABICB[0] - m_ABICA[0]);
 		double BmA = m_tradeOffParameterABICB - m_tradeOffParameterABICA;
@@ -2753,6 +2760,7 @@ void AnalysisControl::minbrkABIC()
 				m_tradeOffParameterABICB = U;
 				m_ABICB = m_ABICU;
 				ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+				ptrObservedData->copyDistortionParamsCurToPWK1();
 				return;
 			}
 			else if (m_ABICU[0] > m_ABICB[0])
@@ -2779,6 +2787,7 @@ void AnalysisControl::minbrkABIC()
 				m_ABICB = m_ABICC;
 				m_ABICC = m_ABICU;
 				ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+				ptrObservedData->copyDistortionParamsCurToPWK1();
 				m_tradeOffParameterForResistivityValue = pow(10.0, U);
 				m_ptrInversion->inversionCalculation();
 				m_ABICU = m_ptrInversion->getabic();
@@ -3001,6 +3010,7 @@ std::vector<double> AnalysisControl::fminbrentABIC()
 
 	// Resistivity block instance
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
+	ObservedData *const ptrObservedData = ObservedData::getInstance();
 
 	for (int iter = 0; iter < ITMAX; ++iter)
 	{
@@ -3079,6 +3089,7 @@ std::vector<double> AnalysisControl::fminbrentABIC()
 			x = u;
 			fx = fu;
 			ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+			ptrObservedData->copyDistortionParamsCurToPWK1();
 		}
 		else
 		{

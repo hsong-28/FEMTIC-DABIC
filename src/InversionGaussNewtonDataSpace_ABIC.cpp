@@ -108,7 +108,7 @@ void InversionGaussNewtonDataSpace_ABIC::inversionCalculation()
 		double *modelVector = new double[numModel];
 		double *modelNormVector = new double[numModel];
 		ptrResistivityBlock->copyResistivityValuesNotFixedPreToVectorLog10(modelVector); 
-		ptrObservedData->copyDistortionParamsNotFixedPreToVector(&modelVector[nBlkNotFixed]);
+		ptrObservedData->copyDistortionParamsNotFixedPreToVector(&modelVector[nBlkNotFixed]); //!!
 #ifdef _DEBUG_WRITE
 		std::cout << "Model roughness : " << constrainingMatrix.calcModelRoughness(modelVector) << std::endl;
 #endif
@@ -1204,6 +1204,7 @@ void InversionGaussNewtonDataSpace_ABIC::calcConstrainingMatrixForDifferenceFilt
 }
 
 // Calculate forward computation
+// No additional output compared to original Forward camputation
 void InversionGaussNewtonDataSpace_ABIC::calcForwardComputation_ABIC()
 {
 	const AnalysisControl *const ptrAnalysisControl = AnalysisControl::getInstance();

@@ -102,6 +102,12 @@ class ObservedDataStationMT: public ObservedDataStationPoint{
 		// Copy current distortion parameters to previous ones
 		void copyDistortionParamsCurToPre( const int iComp );
 
+		// Copy current distortion parameters to pwk1 during ABIC minimization
+		void copyDistortionParamsCurToPWK1( const int iComp );
+
+		// Copy pwk1 distortion parameters to current during ABIC minimization
+		void copyDistortionParamsPWK1ToCur( const int iComp );
+
 		// Get flag specifing whether distortion matrix are fixed or not
 		bool doesFixDistortionMatrix() const;
 
@@ -149,11 +155,14 @@ class ObservedDataStationMT: public ObservedDataStationPoint{
 			// Distortion matrix difference
 			double distortionMatrixDifference[4];
 
-			// Distorsion matrix difference obtained by inversion which is the ones fully updated ( damping factor = 1 )
+			// Distortion matrix difference obtained by inversion which is the ones fully updated ( damping factor = 1 )
 			double distortionMatrixDifferenceUpdatedFull[4];
 
 			// Component ID of distortion matrix difference. This ID is -1 if distortion matrix is fixed or this station has no data
 			int IDsOfDistortionMatrixDifference[4];
+
+			// Distortion matrix difference for ABIC minimization
+			double distortionMatrixDifferencePWK1[4];
 		};
 
 		struct GainsAndRotations{
@@ -162,6 +171,9 @@ class ObservedDataStationMT: public ObservedDataStationPoint{
 
 			// Gains and rotations of distortion matrix
 			double gainsAndRotations[4];
+
+			// Gains and rotations of distortion matrix during ABIC minimization
+			double gainsAndRotationsPWK1[4];
 
 			// Gains and rotations of distortion matrix obtained by inversion which is the ones fully updated ( damping factor = 1 )
 			double gainsAndRotationsUpdatedFull[4];
