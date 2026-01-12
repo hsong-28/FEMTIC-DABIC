@@ -708,6 +708,7 @@ void AnalysisControl::run()
 							if (count > 0)
 							{
 								ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
+								ptrObservedData->copyDistortionParamsCurToPWK1();
 							}
 							count += +1;
 							m_stepLengthDampingFactorCur = (1.0 / pow(2.0, count)) * m_stepLengthDampingFactorPre;
@@ -720,12 +721,14 @@ void AnalysisControl::run()
 							std::cout << " # Finding Intercept: approaching the root (RMS - m_tolreq = 0)..." << std::endl;
 						}
 						ptrResistivityBlock->copyResistivityValuesNotFixedToPWK2();
+						ptrObservedData->copyDistortionParamsCurToPWK2();
 						m_stepLengthDampingFactorCur = frootABIC();
 						if (myProcessID == 0)
 						{
 							std::cout << " # Tolerance is met (approximately) at trade-off parameter  = " << m_tradeOffParameterForResistivityValue << "  with step_size = " << m_stepLengthDampingFactorCur << std::endl;
 						}
 						ptrResistivityBlock->copyPWK2NotFixedToPWK1();
+						ptrObservedData->copyDistortionParamsPWK2ToPWK1();
 					}
 					ptrResistivityBlock->copyPWK1NotFixedToResistivityValues();
 					ptrObservedData->copyDistortionParamsPWK1ToCur();
@@ -2839,6 +2842,7 @@ References:
 	*/
 	// Resistivity block instance
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
+	ObservedData *const ptrObservedData = ObservedData::getInstance();
 	const int ITMAX = 100;	  // Maximum iterations
 	const double EPS = 3.E-8; // Convergence threshold
 	const double tol = 0.1;	  // Tolerance for convergence
@@ -2867,6 +2871,7 @@ References:
 
 	// Copy initial models
 	ptrResistivityBlock->copyPWK2NotFixedToPWK3();
+	ptrObservedData->copyDistortionParamsPWK2ToPWK3();
 
 	for (int iter = 0; iter < ITMAX; ++iter)
 	{
@@ -2878,6 +2883,7 @@ References:
 			dd = b - aa;
 			e = dd;
 			ptrResistivityBlock->copyPWK1NotFixedToPWK3();
+			ptrObservedData->copyDistortionParamsPWK1ToPWK3();
 		}
 
 		if (std::fabs(fc[1]) < std::fabs(fb[1]))
@@ -2890,8 +2896,12 @@ References:
 			fb = fc;
 			fc = fa;
 			ptrResistivityBlock->copyPWK2NotFixedToPWK1();
+			ptrObservedData->copyDistortionParamsPWK2ToPWK1();
 			ptrResistivityBlock->copyPWK3NotFixedToPWK2();
+			ptrObservedData->copyDistortionParamsPWK3ToPWK2();
 			ptrResistivityBlock->copyPWK1NotFixedToPWK3();
+			ptrObservedData->copyDistortionParamsPWK1ToPWK3();
+			
 		}
 
 		double tol1 = 2.0 * EPS * std::fabs(b) + 0.5 * tol;
@@ -2949,6 +2959,7 @@ References:
 		aa = b;
 		fa = fb;
 		ptrResistivityBlock->copyPWK2NotFixedToPWK1();
+		ptrObservedData->copyDistortionParamsPWK2ToPWK1();
 		if (std::fabs(dd) > tol1)
 		{
 			b += dd;
@@ -2963,6 +2974,7 @@ References:
 		fb = m_ptrInversion->getabic();
 		fb[1] = fb[1] - m_tolreq; // Recalculate function value at new b
 		ptrResistivityBlock->copyResistivityValuesNotFixedToPWK2();
+		ptrObservedData->copyDistortionParamsCurToPWK2();
 	}
 
 	// Maximum iterations exceeded

@@ -2060,6 +2060,133 @@ void ObservedData::copyDistortionParamsCurToPWK1() const{
 
 }
 
+// Copy pwk1 distortion parameters to pwk2 during ABIC minimization
+void ObservedData::copyDistortionParamsCurToPWK2() const{
+
+	if( (AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		for ( int i = 0; i < m_numStationsMT; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationMT[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationMT[i].copyDistortionParamsCurToPWK2(iComp); 
+				}
+			}
+		}
+		for ( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationApparentResistivityAndPhase[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationApparentResistivityAndPhase[i].copyDistortionParamsCurToPWK2(iComp); 
+				}
+			}
+		}
+	}
+
+}
+
+// Copy pwk1 distortion parameters to pwk2 during ABIC minimization
+void ObservedData::copyDistortionParamsPWK2ToPWK1() const{
+
+	if( (AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		for ( int i = 0; i < m_numStationsMT; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationMT[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationMT[i].copyDistortionParamsPWK2ToPWK1(iComp); 
+				}
+			}
+		}
+		for ( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationApparentResistivityAndPhase[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationApparentResistivityAndPhase[i].copyDistortionParamsPWK2ToPWK1(iComp); 
+				}
+			}
+		}
+	}
+
+}
+
+void ObservedData::copyDistortionParamsPWK2ToPWK3() const{
+
+	if( (AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		for ( int i = 0; i < m_numStationsMT; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationMT[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationMT[i].copyDistortionParamsPWK2ToPWK3(iComp); 
+				}
+			}
+		}
+		for ( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationApparentResistivityAndPhase[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationApparentResistivityAndPhase[i].copyDistortionParamsPWK2ToPWK3(iComp); 
+				}
+			}
+		}
+	}
+
+}
+
+void ObservedData::copyDistortionParamsPWK3ToPWK2() const{
+
+	if( (AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		for ( int i = 0; i < m_numStationsMT; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationMT[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationMT[i].copyDistortionParamsPWK3ToPWK2(iComp); 
+				}
+			}
+		}
+		for ( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationApparentResistivityAndPhase[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationApparentResistivityAndPhase[i].copyDistortionParamsPWK3ToPWK2(iComp); 
+				}
+			}
+		}
+	}
+
+}
+
+void ObservedData::copyDistortionParamsPWK1ToPWK3() const{
+
+	if( (AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ||
+		(AnalysisControl::getInstance())->getTypeOfDistortion() == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		for ( int i = 0; i < m_numStationsMT; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationMT[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationMT[i].copyDistortionParamsPWK1ToPWK3(iComp); 
+				}
+			}
+		}
+		for ( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			for( int iComp = 0; iComp < 4; ++iComp ){
+				const int index = m_observedStationApparentResistivityAndPhase[i].getIDOfDistortionParams(iComp);
+				if( index >= 0 ){
+					m_observedStationApparentResistivityAndPhase[i].copyDistortionParamsPWK1ToPWK3(iComp); 
+				}
+			}
+		}
+	}
+
+}
+
 
 // Copy current distortion parameters to pwk1 during ABIC minimization
 void ObservedData::copyDistortionParamsPWK1ToCur() const{

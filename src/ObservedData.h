@@ -159,8 +159,11 @@ public:
 
 	// Copy current distortion parameters to pwk1 during the ABIC minimization
 	void copyDistortionParamsCurToPWK1() const;
-
-	// Copy distortion parameters stored in pwk1 to current when finish the ABIC minimization
+	void copyDistortionParamsCurToPWK2() const;
+	void copyDistortionParamsPWK2ToPWK1() const;
+	void copyDistortionParamsPWK2ToPWK3() const;
+	void copyDistortionParamsPWK3ToPWK2() const;
+	void copyDistortionParamsPWK1ToPWK3() const;
 	void copyDistortionParamsPWK1ToCur() const;
 
 	// Calculate full updated values of distortion parameters

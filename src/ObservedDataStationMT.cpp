@@ -1107,6 +1107,155 @@ void ObservedDataStationMT::copyDistortionParamsCurToPWK1( const int iComp ){
 
 }
 
+// Copy current distortion parameters to pwk1 during ABIC minimization
+void ObservedDataStationMT::copyDistortionParamsCurToPWK2( const int iComp ){
+
+	const int type = ( AnalysisControl::getInstance() )->getTypeOfDistortion();
+	if( type == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+		assert( m_arrayDistortionMatrixDifferences != NULL );
+		assert( iComp >= COMPONENT_ID_CXX );
+		assert( iComp <= COMPONENT_ID_CYY );
+		m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK2[iComp] = m_arrayDistortionMatrixDifferences->distortionMatrixDifference[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+		assert( m_arrayGainsAndRotations != NULL );
+		assert( iComp >= EX_GAIN );
+		assert( iComp <= EY_ROTATION );
+		m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp] = m_arrayGainsAndRotations->gainsAndRotations[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp] = m_arrayGainsAndRotations->gainsAndRotations[iComp];
+	}else{
+		OutputFiles::m_logFile << "Error : Type of galvanic distortion is wrong. : " << type << std::endl;
+		exit(1);
+	}
+
+}
+
+void ObservedDataStationMT::copyDistortionParamsPWK2ToPWK1( const int iComp ){
+
+	const int type = ( AnalysisControl::getInstance() )->getTypeOfDistortion();
+	if( type == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+		assert( m_arrayDistortionMatrixDifferences != NULL );
+		assert( iComp >= COMPONENT_ID_CXX );
+		assert( iComp <= COMPONENT_ID_CYY );
+		m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK1[iComp] = m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK2[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+		assert( m_arrayGainsAndRotations != NULL );
+		assert( iComp >= EX_GAIN );
+		assert( iComp <= EY_ROTATION );
+		m_arrayGainsAndRotations->gainsAndRotationsPWK1[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		m_arrayGainsAndRotations->gainsAndRotationsPWK1[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp];
+	}else{
+		OutputFiles::m_logFile << "Error : Type of galvanic distortion is wrong. : " << type << std::endl;
+		exit(1);
+	}
+
+}
+
+// Copy pwk1 distortion parameters to pwk2 during ABIC minimization
+void ObservedDataStationMT::copyDistortionParamsPWK1ToPWK2( const int iComp ){
+
+	const int type = ( AnalysisControl::getInstance() )->getTypeOfDistortion();
+	if( type == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+		assert( m_arrayDistortionMatrixDifferences != NULL );
+		assert( iComp >= COMPONENT_ID_CXX );
+		assert( iComp <= COMPONENT_ID_CYY );
+		m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK2[iComp] = m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK1[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+		assert( m_arrayGainsAndRotations != NULL );
+		assert( iComp >= EX_GAIN );
+		assert( iComp <= EY_ROTATION );
+		m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK1[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK1[iComp];
+	}else{
+		OutputFiles::m_logFile << "Error : Type of galvanic distortion is wrong. : " << type << std::endl;
+		exit(1);
+	}
+
+}
+
+// Copy pwk1 distortion parameters to pwk2 during ABIC minimization
+void ObservedDataStationMT::copyDistortionParamsPWK2ToPWK3( const int iComp ){
+
+	const int type = ( AnalysisControl::getInstance() )->getTypeOfDistortion();
+	if( type == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+		assert( m_arrayDistortionMatrixDifferences != NULL );
+		assert( iComp >= COMPONENT_ID_CXX );
+		assert( iComp <= COMPONENT_ID_CYY );
+		m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK3[iComp] = m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK2[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+		assert( m_arrayGainsAndRotations != NULL );
+		assert( iComp >= EX_GAIN );
+		assert( iComp <= EY_ROTATION );
+		m_arrayGainsAndRotations->gainsAndRotationsPWK3[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		m_arrayGainsAndRotations->gainsAndRotationsPWK3[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp];
+	}else{
+		OutputFiles::m_logFile << "Error : Type of galvanic distortion is wrong. : " << type << std::endl;
+		exit(1);
+	}
+
+}
+
+// Copy pwk1 distortion parameters to pwk2 during ABIC minimization
+void ObservedDataStationMT::copyDistortionParamsPWK3ToPWK2( const int iComp ){
+
+	const int type = ( AnalysisControl::getInstance() )->getTypeOfDistortion();
+	if( type == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+		assert( m_arrayDistortionMatrixDifferences != NULL );
+		assert( iComp >= COMPONENT_ID_CXX );
+		assert( iComp <= COMPONENT_ID_CYY );
+		m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK2[iComp] = m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK3[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+		assert( m_arrayGainsAndRotations != NULL );
+		assert( iComp >= EX_GAIN );
+		assert( iComp <= EY_ROTATION );
+		m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK3[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		m_arrayGainsAndRotations->gainsAndRotationsPWK2[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK3[iComp];
+	}else{
+		OutputFiles::m_logFile << "Error : Type of galvanic distortion is wrong. : " << type << std::endl;
+		exit(1);
+	}
+
+}
+
+// Copy pwk1 distortion parameters to pwk2 during ABIC minimization
+void ObservedDataStationMT::copyDistortionParamsPWK1ToPWK3( const int iComp ){
+
+	const int type = ( AnalysisControl::getInstance() )->getTypeOfDistortion();
+	if( type == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+		assert( m_arrayDistortionMatrixDifferences != NULL );
+		assert( iComp >= COMPONENT_ID_CXX );
+		assert( iComp <= COMPONENT_ID_CYY );
+		m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK3[iComp] = m_arrayDistortionMatrixDifferences->distortionMatrixDifferencePWK1[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+		assert( m_arrayGainsAndRotations != NULL );
+		assert( iComp >= EX_GAIN );
+		assert( iComp <= EY_ROTATION );
+		m_arrayGainsAndRotations->gainsAndRotationsPWK3[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK1[iComp];
+	}
+	else if( type == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+		m_arrayGainsAndRotations->gainsAndRotationsPWK3[iComp] = m_arrayGainsAndRotations->gainsAndRotationsPWK1[iComp];
+	}else{
+		OutputFiles::m_logFile << "Error : Type of galvanic distortion is wrong. : " << type << std::endl;
+		exit(1);
+	}
+
+}
+
 // Copy pwk1 distortion parameters to current during ABIC minimization
 void ObservedDataStationMT::copyDistortionParamsPWK1ToCur( const int iComp ){
 
