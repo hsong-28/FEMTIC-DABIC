@@ -11,7 +11,9 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 ## Release note
 
-***v1.3.2*** Dec. 29, 2025: I have corrected the output format problem in the "femtic-dabic.cnv" file.
+***v1.4.0*** Jan. 12, 2025: I've revised the D-DABIC workflow to ensure it is capable of incorporating the distortion correction functionality.
+
+***v1.3.2*** Dec. 29, 2025: I've corrected the output format problem in the "femtic-dabic.cnv" file.
 
 ***v1.3.1*** Dec. 27, 2025: I’ve made a minor adjustment: the step size (i.e., the difference between two *α* in adjacent searches) of the Brent line search has been reduced to ensure a more accurate search for the minimum value of DABIC. Meanwhile, since the statistically optimal *α* do not differ significantly between adjacent iterations, this also reduces the number of searches in each iteration.
 
