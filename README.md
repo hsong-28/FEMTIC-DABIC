@@ -23,10 +23,6 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 
 ## Contact information
-For any questions, please contact the authors:  
-Han Song: 1831736@tongji.edu.cn;   
-Peng Yu: yupeng@tongji.edu.cn;   
-Yoshiya Usui: yusui@eri.u-tokyo.ac.jp;  
-Makoto Uyeshima: uyeshima@eri.u-tokyo.ac.jp;  
-Dieno Diba: dienodiba@cp.dias.ie;  
-Luolei Zhang: zhangluolei@hotmail.com
+If you encounter any issues, have questions, or want to provide feedback, please feel free to contact:
+Han SONG (Email: 1831736@tongji.edu.cn)
+You may also report issues via the project's repository (e.g., GitHub Issues).
