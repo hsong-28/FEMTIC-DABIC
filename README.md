@@ -11,7 +11,7 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 ## Release note
 
-***v1.4*** Jan. 12, 2025: I've revised the D-DABIC workflow to ensure it is capable of incorporating the distortion correction functionality.
+***v1.4*** Jan. 12, 2026: I've revised the D-DABIC workflow to ensure it is capable of incorporating the distortion correction functionality.
 
 ***v1.3*** Sep. 13, 2025: Added Minimum Norm (MN) Stabilizer with Depth of Investigation (DOI) Support. Introduced a new regularization option (|m - m_r|) to constrain inversion toward a reference model (m_r); the primary purpose of this option (for now) is to enable DOI analysis for model appraisal.
 
