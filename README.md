@@ -24,6 +24,6 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 ## Contact information
 If you encounter any issues, have questions, or want to provide feedback, please feel free to contact:\
-Han SONG: Email: 1831736@tongji.edu.cn\
+Han SONG: 1831736@tongji.edu.cn\
 Yoshiya USUI: yusui@eri.u-tokyo.ac.jp\
 You may also report issues via the project's repository (e.g., GitHub Issues).
