@@ -28,7 +28,7 @@ Current release: **v2.7.0**.
 The complete installation, input, control-keyword, inversion-method, and output
 reference is available in:
 
-- [FEMTIC-DABIC User Manual v2.7.0](FEMTIC-DABIC_UserManual_v2.7.0.pdf)
+- [FEMTIC-DABIC User Manual v2.7.0](docs/FEMTIC-DABIC_UserManual_v2.7.0.pdf)
 
 ## Build
 
@@ -72,15 +72,35 @@ mpirun -np 2 /path/to/FEMTIC-DABIC/src/femtic-dabic
 stabilization is enabled. See the User Manual before preparing a scientific or
 production run.
 
+## Example
+
+A runnable exact-ABIC example based on the simplified Atotsugawa Fault model
+is provided in [`examples/AtotsugawaFault`](examples/AtotsugawaFault). It
+contains `control.dat`, `mesh.dat`, `observe.dat`, and
+`resistivity_block_iter0.dat`.
+
+```bash
+cd examples/AtotsugawaFault
+export OMP_NUM_THREADS=2
+export MKL_NUM_THREADS=2
+mpirun -np 2 ../../src/femtic-dabic
+```
+
+The supplied control runs iterations 0-2. Replace `EXACT` with `INEXACT` under
+`ABIC_SEARCH_MODE` to use inexact ABIC. Increase the maximum iteration only
+after the initial run has been checked.
+
 ## Repository Layout
 
 ```text
 src/       program source and Makefile
+docs/      user manual
+examples/  runnable Atotsugawa example
 LICENSE    MIT license and FEMTIC/FEMTIC-DABIC attribution
 ```
 
-Datasets, inversion outputs, debug runs, and server scratch directories are
-not included in the GitHub source release.
+Large research datasets, inversion outputs, debug runs, and server scratch
+directories are not included in the GitHub source release.
 
 ## Release Note
 
