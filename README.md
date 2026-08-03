@@ -10,6 +10,13 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 
 ## Release note
+***v2.7*** Aug. 3, 2026: Simplified the ABIC interface while preserving the bracket-only inexact workflow and same-alpha reduced-step retry.
+
+***v2.6*** Jul. 16, 2026: Implemented scalar negative-standard-deviation masking for raw MT and VTF real and imaginary data, so inactive observations no longer contribute to the residual, sensitivity matrix, RMS, or model update.
+
+***v2.5*** Jun. 27, 2026: Added production model-resolution and covariance-diagonal appraisal using run-local sensitivity matrices and the active roughening operator.
+
+***v2.3*** Jun. 23, 2026: Unified fixed-alpha, ABIC, OCCAM, linear cubic-spline L-curve, and nonlinear cubic-spline L-curve inversion under one maintained control and diagnostic framework.
 
 ***v1.4*** Jan. 12, 2026: I've revised the D-DABIC workflow to ensure it is capable of incorporating the distortion correction functionality.
 
