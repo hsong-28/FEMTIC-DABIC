@@ -1,6 +1,6 @@
 # FEMTIC-DABIC
 
-FEMTIC-DABIC is a general-purpose 3-D magnetotelluric (MT) inversion program
+FEMTIC-DABIC is a 3-D magnetotelluric (MT) inversion program
 derived from [FEMTIC](https://github.com/yoshiya-usui/femtic). Its principal
 inversion method is a data-space variant of Akaike's Bayesian Information
 Criterion (D-DABIC); OCCAM and nonlinear cubic-spline L-curve inversion are
