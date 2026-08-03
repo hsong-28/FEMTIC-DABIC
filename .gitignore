@@ -11,6 +11,7 @@ FEMTIC-DABIC*.cnv
 result_*
 Resistivity.iter*
 resistivity_block_iter*.dat
+!examples/AtotsugawaFault/resistivity_block_iter0.dat
 sensMatFreq*
 Mesh.geo
 BlockIDs
