@@ -20,8 +20,7 @@ Current release: **v2.7.0**.
 - optional reference-model/minimum-norm constraints and galvanic distortion
   estimation;
 - optional Levenberg-Marquardt damping for stabilizing model updates;
-- model-resolution and covariance-diagonal appraisal;
-- runtime summaries for reviewing inversion results.
+- model-resolution and covariance-diagonal appraisal.
 
 ## Documentation
 
