@@ -14,7 +14,7 @@ For more information about the FEMTIC code, please refer to the FEMTIC repositor
 
 ***v2.6*** Jul. 16, 2026: Implemented scalar negative-standard-deviation masking for raw MT and VTF real and imaginary data, so inactive observations no longer contribute to the residual, sensitivity matrix, RMS, or model update.
 
-***v2.5*** Jun. 27, 2026: Added production model-resolution and covariance-diagonal appraisal using run-local sensitivity matrices and the active roughening operator.
+***v2.5*** Jun. 27, 2026: Added production model-resolution and covariance-diagonal appraisal.
 
 ***v2.3*** Jun. 23, 2026: Unified fixed-alpha, ABIC, OCCAM, linear cubic-spline L-curve, and nonlinear cubic-spline L-curve inversion under one maintained control and diagnostic framework.
 
