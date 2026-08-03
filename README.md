@@ -10,7 +10,7 @@ Current release: **v2.7.0**.
 
 ## Main Features
 
-- 3-D MT forward modeling and Gauss-Newton inversion based on FEMTIC;
+- 3-D MT forward modeling and mesh discretization based on FEMTIC;
 - exact and inexact D-DABIC/ABIC inversion;
 - exact and inexact OCCAM inversion;
 - nonlinear cubic-spline L-curve inversion;
