@@ -1,0 +1,18 @@
+# Build artifacts
+src/build/
+src/femtic-dabic
+*.o
+*.d
+*~
+
+# Runtime outputs
+FEMTIC-DABIC*.log
+FEMTIC-DABIC*.cnv
+result_*
+Resistivity.iter*
+resistivity_block_iter*.dat
+sensMatFreq*
+Mesh.geo
+BlockIDs
+run.stdout
+run.stderr
