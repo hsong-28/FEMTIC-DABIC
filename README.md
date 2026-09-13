@@ -73,21 +73,27 @@ production run.
 
 ## Example
 
-A runnable exact-ABIC example based on the simplified Atotsugawa Fault model
-is provided in [`examples/AtotsugawaFault`](examples/AtotsugawaFault). It
-contains `control.dat`, `mesh.dat`, `observe.dat`, and
-`resistivity_block_iter0.dat`.
+A runnable example set based on the simplified Atotsugawa Fault model is
+provided in [`examples/AtotsugawaFault`](examples/AtotsugawaFault). It includes
+exact ABIC, fixed-alpha inversion with a fixed reference model, and exact ABIC
+with distortion correction. The mesh, observations, and initial model are
+stored once under `shared_inputs`.
 
 ```bash
-cd examples/AtotsugawaFault
+case_name=exact_ABIC
+run_dir=/tmp/femtic-dabic-atotsugawa/${case_name}
+mkdir -p "${run_dir}"
+cp examples/AtotsugawaFault/shared_inputs/* "${run_dir}/"
+cp examples/AtotsugawaFault/${case_name}/* "${run_dir}/"
+cd "${run_dir}"
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2
-mpirun -np 2 ../../src/femtic-dabic
+mpirun -np 2 /path/to/FEMTIC-DABIC/src/femtic-dabic
 ```
 
-The supplied control runs iterations 0-2. Replace `EXACT` with `INEXACT` under
-`ABIC_SEARCH_MODE` to use inexact ABIC. Increase the maximum iteration only
-after the initial run has been checked.
+Set `case_name` to `fixed_alpha_reference` or `ABIC_with_distortion` to prepare
+the other cases. All supplied controls run iterations 0-2. See the example
+README before changing inversion settings.
 
 ## Repository Layout
 
