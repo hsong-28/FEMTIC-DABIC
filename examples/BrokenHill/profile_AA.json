@@ -1,0 +1,123 @@
+{
+  "geometry_status": "digitized from AlQahtani et al. (2026) Figure 5 inset; affine-registered to released station coordinates; approximate endpoints",
+  "article_doi": "10.1029/2026JB035666",
+  "source_figure": "Figure 5",
+  "coordinate_convention": "FEMTIC local coordinates: northing, easting in km; no translation or rotation applied",
+  "start_north_east_km": [
+    9.661669400125533,
+    -7.845127866498901
+  ],
+  "end_north_east_km": [
+    -10.19483187833605,
+    5.413136124542172
+  ],
+  "source_geometry_sha256": "32c86886b5feaa9bda8296336eda28dca63f58b5449bb6e465c769d139dfb7e1",
+  "source_station_offsets_sha256": "352a83acf472c03930b439cfa52e845eee65175c353a6bd3ba4f7286152e24aa",
+  "stations": [
+    {
+      "name": "BH_2_imp",
+      "northing_km": 11.02783,
+      "easting_km": -5.895093
+    },
+    {
+      "name": "BH_21_imp",
+      "northing_km": 7.663535,
+      "easting_km": -8.369389
+    },
+    {
+      "name": "BH_20_imp",
+      "northing_km": 7.779387,
+      "easting_km": -6.284294
+    },
+    {
+      "name": "BH_4",
+      "northing_km": 8.666666,
+      "easting_km": -3.027373
+    },
+    {
+      "name": "BH_19",
+      "northing_km": 6.278933,
+      "easting_km": -6.457571
+    },
+    {
+      "name": "BH_3_imp",
+      "northing_km": 7.734525,
+      "easting_km": 0.181046
+    },
+    {
+      "name": "BH_6_imp",
+      "northing_km": 5.119271,
+      "easting_km": -1.715203
+    },
+    {
+      "name": "BH_8_imp",
+      "northing_km": 5.898535,
+      "easting_km": 2.248781
+    },
+    {
+      "name": "BH_14_imp",
+      "northing_km": 2.495735,
+      "easting_km": -1.684368
+    },
+    {
+      "name": "BH_13_imp",
+      "northing_km": 3.035346,
+      "easting_km": 1.09869
+    },
+    {
+      "name": "BH_15_imp",
+      "northing_km": 4.146148,
+      "easting_km": 4.791907
+    },
+    {
+      "name": "BH_7_imp",
+      "northing_km": 0.005602,
+      "easting_km": -0.239191
+    },
+    {
+      "name": "BH_12_imp",
+      "northing_km": 2.441,
+      "easting_km": 4.177806
+    },
+    {
+      "name": "BH_18_imp",
+      "northing_km": 4.719979,
+      "easting_km": 9.253883
+    },
+    {
+      "name": "BH_1",
+      "northing_km": -2.021284,
+      "easting_km": -2.388076
+    },
+    {
+      "name": "BH_5",
+      "northing_km": -0.780271,
+      "easting_km": 2.414513
+    },
+    {
+      "name": "BH_17_imp",
+      "northing_km": -3.466186,
+      "easting_km": 0.900306
+    },
+    {
+      "name": "BH_10_imp",
+      "northing_km": -2.818695,
+      "easting_km": 5.171237
+    },
+    {
+      "name": "BH_9_imp",
+      "northing_km": -5.341274,
+      "easting_km": 5.240312
+    },
+    {
+      "name": "BH_11",
+      "northing_km": -6.706907,
+      "easting_km": 3.699694
+    },
+    {
+      "name": "BH_16_imp",
+      "northing_km": -8.943158,
+      "easting_km": 5.434588
+    }
+  ]
+}

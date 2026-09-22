@@ -71,7 +71,7 @@ mpirun -np 2 /path/to/FEMTIC-DABIC/src/femtic-dabic
 stabilization is enabled. See the User Manual before preparing a scientific or
 production run.
 
-## Example
+## Examples
 
 A runnable example set based on the simplified Atotsugawa Fault model is
 provided in [`examples/AtotsugawaFault`](examples/AtotsugawaFault). It includes
@@ -95,17 +95,22 @@ Set `case_name` to `fixed_alpha_reference` or `ABIC_with_distortion` to prepare
 the other cases. All supplied controls run iterations 0-2. See the example
 README before changing inversion settings.
 
+[`examples/BrokenHill`](examples/BrokenHill) provides six field-data ABIC cases
+covering mesh refinement, Difference-L1 regularization, and galvanic distortion.
+It includes native inputs, reference convergence histories, a report, and an
+A-A' plotting script. See its README for usage and validation scope.
+
 ## Repository Layout
 
 ```text
 src/       program source and Makefile
 docs/      user manual
-examples/  runnable Atotsugawa example
+examples/  Atotsugawa Fault and Broken Hill examples
 LICENSE    MIT license and FEMTIC/FEMTIC-DABIC attribution
 ```
 
-Large research datasets, inversion outputs, debug runs, and server scratch
-directories are not included in the GitHub source release.
+Full inversion outputs, debug runs, and server scratch directories are not
+included in the GitHub source release.
 
 ## Release Note
 

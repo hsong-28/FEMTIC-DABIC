@@ -1,0 +1,6 @@
+# Preserve exact input and checksum bytes on every platform.
+* -text whitespace=cr-at-eol
+# Large native inputs retain their bytes without generating text diffs.
+**/mesh.dat -diff
+**/observe.dat -diff
+**/resistivity_block_iter*.dat -diff
