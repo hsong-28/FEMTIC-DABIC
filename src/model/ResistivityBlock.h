@@ -109,6 +109,21 @@ public:
 	// Get total number of resistivity blocks
 	int getNumResistivityBlockTotal() const;
 
+#ifdef _HDF5_OUT
+	// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+	double getResistivityValuesMinFromBlockID(const int iblk) const;
+	double getResistivityValuesMaxFromBlockID(const int iblk) const;
+	double getWeightingConstantFromBlockID(const int iblk) const;
+	int    getTypeOfResistivityBlockHDF5(const int iblk) const;
+
+#endif // _HDF5_OUT
+
+#ifdef _HDF5_JAC
+	// Read-only access to the roughening matrix (CRS format), written to
+	// exchange.h5 together with the Jacobian (2026-10-01).
+	const RougheningSquareMatrix& getRougheningMatrix() const;
+#endif // _HDF5_JAC
+
 	// Get number of resistivity blocks whose resistivity values are not fixed
 	int getNumResistivityBlockNotFixed() const;
 
@@ -223,6 +238,24 @@ public:
 
 	// Output resistivity-block model data to file
 	void outputResisitivityBlock( const int iterNum ) const;
+
+	// Output the two per-block sensitivity values (raw and
+	// volume-normalised, computed exactly as in OutputHDF5.cpp's
+	// writeModelGroup()/results_iterN.h5 /model/sensitivity) to
+	// sensitivity_iterN.dat and sensitivity_normalized_iterN.dat
+	// respectively -- same file structure as
+	// outputResisitivityBlock()/resistivity_block_iterN.dat (element/block
+	// counts, element->block map, one line per block), but as separate
+	// files, not extra columns on the resistivity file.
+	// sensitivityScalarValuesReduced: globally-reduced (already
+	// MPI_Allreduce'd across all PEs) per-model-parameter sensitivity
+	// array -- see Inversion::getSensitivityScalarValuesReduced(). Caller
+	// should only call this when non-NULL (i.e. skip entirely for
+	// iterations where sensitivity was not computed) -- unlike the
+	// resistivity file, these two are not written every iteration.
+	// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+	// (Anthropic), 2026-09-14.
+	void outputSensitivityBlock( const int iterNum, const double* sensitivityScalarValuesReduced ) const;
 
 	// Output appraisal block data with an explicit family/quantity/checkpoint name
 	void outputAppraisalResistivityBlock(

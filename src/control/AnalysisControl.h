@@ -348,6 +348,15 @@ public:
 	// Get flag specifing whether output file for paraview is binary or ascii
 	bool writeBinaryFormat() const;
 
+	// Get flag specifing whether per-iteration csv/vtk diagnostic output
+	// files are suppressed (OFILE_TYPE == -1 in control.dat). Does NOT
+	// affect resistivity_block_iterX.dat, distortion_iterX.dat,
+	// sensitivity_iterX.dat/sensitivity_normalized_iterX.dat, or any other
+	// .dat/.h5 output.
+	// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+	// (Anthropic), 2026-09-14.
+	bool suppressCsvVtkOutput() const;
+
 	// Get inversion method
 	int getInversionMethod() const;
 
@@ -744,6 +753,13 @@ private:
 
 	// Flag specifing whether output file for paraview is binary or ascii
 	bool m_binaryOutput;
+
+	// Flag specifing whether per-iteration csv/vtk diagnostic output is
+	// suppressed (OFILE_TYPE == -1 in control.dat). See
+	// suppressCsvVtkOutput() above.
+	// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+	// (Anthropic), 2026-09-14.
+	bool m_suppressCsvVtkOutput;
 
 	// Type of galvanic distortion
 	int m_typeOfDistortion;

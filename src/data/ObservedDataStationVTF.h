@@ -31,6 +31,7 @@
 #include "Forward3D.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of VTF station
 class ObservedDataStationVTF: public ObservedDataStationPoint{
@@ -86,6 +87,31 @@ class ObservedDataStationVTF: public ObservedDataStationPoint{
 
 		// Get VTK
 		bool getVTF( const double freq, std::complex<double>& Tzx, std::complex<double>& Tzy ) const;
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		std::complex<double> getTzxObserved(const int i) const { return m_TzxObserved[i]; }
+		std::complex<double> getTzyObserved(const int i) const { return m_TzyObserved[i]; }
+		double getTzxSDRe(const int i) const { return m_TzxSD[i].realPart; }
+		double getTzxSDIm(const int i) const { return m_TzxSD[i].imagPart; }
+		double getTzySDRe(const int i) const { return m_TzySD[i].realPart; }
+		double getTzySDIm(const int i) const { return m_TzySD[i].imagPart; }
+
+		// Collect this PE's calculated VTF values for results_iterN.h5.
+		// Component order 0=Tzx 1=Tzy, matching OutputHDF5.cpp's /data
+		// row layout.
+		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+		// (Anthropic), 2026-09-13.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	private:
 		std::complex<double>* m_TzxObserved;

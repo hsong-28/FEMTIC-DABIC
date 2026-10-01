@@ -497,6 +497,29 @@ void ObservedDataStationNMT::outputCalculatedValues() const{
 	}
 }
 
+#ifdef _HDF5_OUT
+// Collect this PE's calculated NMT response values for results_iterN.h5.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
+void ObservedDataStationNMT::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
+
+	int icount(0);
+	for( std::vector<int>::const_iterator itr = m_freqIDsAmongThisStationCalculatedByThisPE.begin(); itr != m_freqIDsAmongThisStationCalculatedByThisPE.end(); ++itr ){
+		const std::complex<double> cal[2] = { m_YxCalculated[icount], m_YyCalculated[icount] };
+		for( int c = 0; c < 2; ++c ){
+			FemticHDF5CalcRow r;
+			r.site_id   = m_stationID;
+			r.datatype  = FemticHDF5::DTYPE_NMT;
+			r.freq      = m_freq[*itr];
+			r.component = c;
+			r.cal_re    = cal[c].real();
+			r.cal_im    = cal[c].imag();
+			rows.push_back(r);
+		}
+		++icount;
+	}
+}
+#endif // _HDF5_OUT
+
 // Calulate interpolator vector of voltage difference
 void ObservedDataStationNMT::calcInterpolatorVectorOfVoltageDifference( Forward3D* const ptrForward3D ){
 
@@ -663,3 +686,20 @@ double ObservedDataStationNMT::getZCoordOfPoint( const int num ) const{
 	}
 
 }
+
+#ifdef _HDF5_JAC
+// Collect data-error (SD) vector in same slot order as residual vector
+// (ported from femtic_v4_src, 2026-08-21).
+void ObservedDataStationNMT::collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const{
+
+	const int freqIDThisPEInSta = getFreqIDsAmongThisPE( freq );
+	if( freqIDThisPEInSta < 0 ) return;
+	const int freqIDGlobalInSta = m_freqIDsAmongThisStationCalculatedByThisPE[ freqIDThisPEInSta ];
+
+	vector[ offset + m_dataIDOfYx[freqIDThisPEInSta].realPart ] = m_YxSD[freqIDGlobalInSta].realPart;
+	vector[ offset + m_dataIDOfYx[freqIDThisPEInSta].imagPart ] = m_YxSD[freqIDGlobalInSta].imagPart;
+	vector[ offset + m_dataIDOfYy[freqIDThisPEInSta].realPart ] = m_YySD[freqIDGlobalInSta].realPart;
+	vector[ offset + m_dataIDOfYy[freqIDThisPEInSta].imagPart ] = m_YySD[freqIDGlobalInSta].imagPart;
+}
+
+#endif // _HDF5_JAC

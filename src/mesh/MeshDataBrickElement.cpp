@@ -21,6 +21,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
+// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
 #include <stddef.h>
 #include <stdio.h>
 #include <iostream>
@@ -36,6 +37,7 @@
 #include "CommonParameters.h"
 #include "ResistivityBlock.h"
 #include "OutputFiles.h"
+#include "InputFileMap.h"
 
 // Constructer
 MeshDataBrickElement::MeshDataBrickElement():
@@ -92,10 +94,15 @@ MeshDataBrickElement& MeshDataBrickElement::operator=(const MeshDataBrickElement
 // Input mesh data from "mesh.dat"
 void MeshDataBrickElement::inputMeshData(){
 
-	std::ifstream inFile( "mesh.dat", std::ios::in );
+#ifdef _INPUT_FILE_MAP
+	const std::string meshFileName = InputFileMap::resolve("mesh", "mesh.dat");
+#else
+	const std::string meshFileName = InputFileMap::findOnDisk("mesh.dat");
+#endif
+	std::ifstream inFile( meshFileName.c_str(), std::ios::in );
 	if( inFile.fail() )
 	{
-		std::cerr << "File open error : mesh.dat !!" << std::endl;
+		std::cerr << "File open error : " << meshFileName << " !!" << std::endl;
 		exit(1);
 	}
 

@@ -31,6 +31,7 @@
 #include "ObservedDataStationNMT2.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of apparent resistivity and phase of NMT station ( triangle area )
 class ObservedDataStationNMT2ApparentResistivityAndPhase: public ObservedDataStationNMT2{
@@ -69,6 +70,42 @@ class ObservedDataStationNMT2ApparentResistivityAndPhase: public ObservedDataSta
 
 		// Calulate sum of square of misfit
 		double calculateErrorSumOfSquaresThisPE() const;
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		double getNMT2AppResXXObserved(const int i) const { return m_apparentResistivityXXObserved[i]; }
+		double getNMT2AppResXYObserved(const int i) const { return m_apparentResistivityXYObserved[i]; }
+		double getNMT2AppResYXObserved(const int i) const { return m_apparentResistivityYXObserved[i]; }
+		double getNMT2AppResYYObserved(const int i) const { return m_apparentResistivityYYObserved[i]; }
+		double getNMT2PhaseXXObserved(const int i) const { return m_PhaseXXObserved[i]; }
+		double getNMT2PhaseXYObserved(const int i) const { return m_PhaseXYObserved[i]; }
+		double getNMT2PhaseYXObserved(const int i) const { return m_PhaseYXObserved[i]; }
+		double getNMT2PhaseYYObserved(const int i) const { return m_PhaseYYObserved[i]; }
+		double getNMT2AppResXXSD(const int i) const { return m_apparentResistivityXXSD[i]; }
+		double getNMT2AppResXYSD(const int i) const { return m_apparentResistivityXYSD[i]; }
+		double getNMT2AppResYXSD(const int i) const { return m_apparentResistivityYXSD[i]; }
+		double getNMT2AppResYYSD(const int i) const { return m_apparentResistivityYYSD[i]; }
+		double getNMT2PhaseXXSD(const int i) const { return m_PhaseXXSD[i]; }
+		double getNMT2PhaseXYSD(const int i) const { return m_PhaseXYSD[i]; }
+		double getNMT2PhaseYXSD(const int i) const { return m_PhaseYXSD[i]; }
+		double getNMT2PhaseYYSD(const int i) const { return m_PhaseYYSD[i]; }
+
+		// Collect this PE's calculated apparent-resistivity/phase values
+		// (NMT2 / triangle-area dipole variant) for results_iterN.h5.
+		// Component order 0-3=rhoXX,XY,YX,YY, 4-7=phsXX,XY,YX,YY, matching
+		// OutputHDF5.cpp's /data row layout.
+		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+		// (Anthropic), 2026-09-13.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	private:
 

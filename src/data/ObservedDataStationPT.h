@@ -31,6 +31,7 @@
 #include "Forward3D.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of PT station
 class ObservedDataStationPT: public ObservedDataStationPoint{
@@ -83,6 +84,33 @@ class ObservedDataStationPT: public ObservedDataStationPoint{
 
 		// Set type of the electric field used to calculate response functions
 		void setTypeOfElectricField( const int type );
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		double getPTxxObserved(const int i) const { return m_PTxxObserved[i]; }
+		double getPTxyObserved(const int i) const { return m_PTxyObserved[i]; }
+		double getPTyxObserved(const int i) const { return m_PTyxObserved[i]; }
+		double getPTyyObserved(const int i) const { return m_PTyyObserved[i]; }
+		double getPTxxSD(const int i) const { return m_PTxxSD[i]; }
+		double getPTxySD(const int i) const { return m_PTxySD[i]; }
+		double getPTyxSD(const int i) const { return m_PTyxSD[i]; }
+		double getPTyySD(const int i) const { return m_PTyySD[i]; }
+
+		// Collect this PE's calculated Phase-Tensor values for
+		// results_iterN.h5. Component order 0=PTxx 1=PTxy 2=PTyx 3=PTyy,
+		// matching OutputHDF5.cpp's /data row layout.
+		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+		// (Anthropic), 2026-09-13.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	private:
 		double* m_PTxxObserved;

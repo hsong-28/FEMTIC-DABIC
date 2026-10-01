@@ -21,6 +21,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
+// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -37,6 +38,7 @@
 #include "OutputFiles.h"
 #include "CommonParameters.h"
 #include "ResistivityBlock.h"
+#include "InputFileMap.h"
 
 #include "Util.h"
 
@@ -154,9 +156,14 @@ ObservedData::~ObservedData(){
 // Input mesh data from "observe.dat"
 void ObservedData::inputObservedData(){
 
-	std::ifstream inFile( "observe.dat", std::ios::in );
+#ifdef _INPUT_FILE_MAP
+	const std::string observeFileName = InputFileMap::resolve("observe", "observe.dat");
+#else
+	const std::string observeFileName = InputFileMap::findOnDisk("observe.dat");
+#endif
+	std::ifstream inFile( observeFileName.c_str(), std::ios::in );
 	if( inFile.fail() ){
-		OutputFiles::m_logFile << "File open error : observe.dat !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << observeFileName << " !!" << std::endl;
 		exit(1);
 	}
 
@@ -2026,6 +2033,46 @@ int ObservedData::getNumDistortionParamsNotFixed() const{
 
 }
 
+#ifdef _HDF5_JAC
+// Collect data-error (SD) vector in same slot order as residual vector
+// (ported from femtic_v4_src, 2026-08-21).
+void ObservedData::collectErrorVectorOfDataThisPE( double* const vector ) const{
+
+	const int nfreq = getNumOfFrequenciesCalculatedByThisPE();
+
+	for( int ifreq = 0; ifreq < nfreq; ++ifreq ){
+
+		const double freq   = getValuesOfFrequenciesCalculatedByThisPE( ifreq );
+		const int    offset = m_numObservedDataThisPEAccumulated[ifreq];
+
+		for( int i = 0; i < m_numStationsMT; ++i )
+			m_observedStationMT[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i )
+			m_observedStationApparentResistivityAndPhase[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsHTF; ++i )
+			m_observedStationHTF[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsVTF; ++i )
+			m_observedStationVTF[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsPT; ++i )
+			m_observedStationPT[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsNMT; ++i )
+			m_observedStationNMT[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsNMT2; ++i )
+			m_observedStationNMT2[i].collectErrorVectorThisPE( freq, offset, vector );
+
+		for( int i = 0; i < m_numStationsNMT2ApparentResistivityAndPhase; ++i )
+			m_observedStationNMT2ApparentResistivityAndPhase[i].collectErrorVectorThisPE( freq, offset, vector );
+	}
+}
+
+#endif // _HDF5_JAC
+
 // Get types of distortion parameters whose value is not fixed
 int ObservedData::getTypesOfDistortionParamsNotFixed( const int iParamsNotFixed ) const{
 
@@ -2444,6 +2491,130 @@ void ObservedData::outputDistortionParams( const int iterNum ) const{
 
 }
 
+#ifdef _HDF5_OUT
+// Collect this PE's calculated response values across every station type,
+// for results_iterN.h5. Called on EVERY PE -- see FemticHDF5CalcTypes.h and
+// the MPI_Gatherv in AnalysisControl.cpp.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
+void ObservedData::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
+
+	for( int i = 0; i < m_numStationsMT; ++i )
+		m_observedStationMT[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i )
+		m_observedStationApparentResistivityAndPhase[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsHTF; ++i )
+		m_observedStationHTF[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsVTF; ++i )
+		m_observedStationVTF[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsPT; ++i )
+		m_observedStationPT[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsNMT; ++i )
+		m_observedStationNMT[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsNMT2; ++i )
+		m_observedStationNMT2[i].collectCalculatedValuesForHDF5( rows );
+
+	for( int i = 0; i < m_numStationsNMT2ApparentResistivityAndPhase; ++i )
+		m_observedStationNMT2ApparentResistivityAndPhase[i].collectCalculatedValuesForHDF5( rows );
+
+}
+
+// Collect the same distortion-parameter values written by
+// outputDistortionParams() (distortion_iterN.dat) as POD rows, for
+// embedding in results_iterN.h5's /distortion group. PE-0-only, like
+// outputDistortionParams() itself -- see the header comment there.
+void ObservedData::collectDistortionParamsForHDF5( std::vector<FemticHDF5DistortionRow>& rows ) const{
+
+	// NOTE: getTypeOfDistortion() returns plain int (see AnalysisControl.h),
+	// not AnalysisControl::TypeOfDistortion -- comparing against the enum
+	// constants below still works because they promote to int.
+	const int distortionType = (AnalysisControl::getInstance())->getTypeOfDistortion();
+
+	if( distortionType == AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE ){
+
+		for( int i = 0; i < m_numStationsMT; ++i ){
+			FemticHDF5DistortionRow r;
+			r.site_id  = m_observedStationMT[i].getStationID();
+			r.param1   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CXX);
+			r.param2   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CXY);
+			r.param3   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CYX);
+			r.param4   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CYY);
+			r.isFixed  = m_observedStationMT[i].doesFixDistortionMatrix() ? 1 : 0;
+			rows.push_back(r);
+		}
+		for( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			FemticHDF5DistortionRow r;
+			r.site_id  = m_observedStationApparentResistivityAndPhase[i].getStationID();
+			r.param1   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CXX);
+			r.param2   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CXY);
+			r.param3   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CYX);
+			r.param4   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::COMPONENT_ID_CYY);
+			r.isFixed  = m_observedStationApparentResistivityAndPhase[i].doesFixDistortionMatrix() ? 1 : 0;
+			rows.push_back(r);
+		}
+
+	}
+	else if( distortionType == AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS ){
+
+		for( int i = 0; i < m_numStationsMT; ++i ){
+			FemticHDF5DistortionRow r;
+			r.site_id  = m_observedStationMT[i].getStationID();
+			r.param1   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::EX_GAIN);
+			r.param2   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::EY_GAIN);
+			r.param3   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::EX_ROTATION) * CommonParameters::rad2deg;
+			r.param4   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::EY_ROTATION) * CommonParameters::rad2deg;
+			r.isFixed  = m_observedStationMT[i].doesFixDistortionMatrix() ? 1 : 0;
+			rows.push_back(r);
+		}
+		for( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			FemticHDF5DistortionRow r;
+			r.site_id  = m_observedStationApparentResistivityAndPhase[i].getStationID();
+			r.param1   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::EX_GAIN);
+			r.param2   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::EY_GAIN);
+			r.param3   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::EX_ROTATION) * CommonParameters::rad2deg;
+			r.param4   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::EY_ROTATION) * CommonParameters::rad2deg;
+			r.isFixed  = m_observedStationApparentResistivityAndPhase[i].doesFixDistortionMatrix() ? 1 : 0;
+			rows.push_back(r);
+		}
+
+	}
+	else if( distortionType == AnalysisControl::ESTIMATE_GAINS_ONLY ){
+
+		for( int i = 0; i < m_numStationsMT; ++i ){
+			FemticHDF5DistortionRow r;
+			r.site_id  = m_observedStationMT[i].getStationID();
+			r.param1   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::EX_GAIN);
+			r.param2   = m_observedStationMT[i].getDistortionParams(ObservedDataStationMT::EY_GAIN);
+			r.param3   = 0.0;
+			r.param4   = 0.0;
+			r.isFixed  = m_observedStationMT[i].doesFixDistortionMatrix() ? 1 : 0;
+			rows.push_back(r);
+		}
+		for( int i = 0; i < m_numStationsApparentResistivityAndPhase; ++i ){
+			FemticHDF5DistortionRow r;
+			r.site_id  = m_observedStationApparentResistivityAndPhase[i].getStationID();
+			r.param1   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::EX_GAIN);
+			r.param2   = m_observedStationApparentResistivityAndPhase[i].getDistortionParams(ObservedDataStationMT::EY_GAIN);
+			r.param3   = 0.0;
+			r.param4   = 0.0;
+			r.isFixed  = m_observedStationApparentResistivityAndPhase[i].doesFixDistortionMatrix() ? 1 : 0;
+			rows.push_back(r);
+		}
+
+	}
+	else{
+		OutputFiles::m_logFile << "Error : Wrong type of distortion matrix !!" << std::endl;
+		exit(1);
+	}
+
+}
+#endif // _HDF5_OUT
+
 // Output information of locations of observed stations to vtk file
 void ObservedData::outputLocationsOfObservedStationsToVtk() const{
 
@@ -2677,6 +2848,16 @@ void ObservedData::outputLocationsOfObservedStationsToVtk() const{
 void ObservedData::outputInductionArrowToVtk( const int iterNum ) const{
 
 	if( m_numStationsVTF <= 0 ){
+		return;
+	}
+
+	if( ( AnalysisControl::getInstance() )->suppressCsvVtkOutput() ){
+		// OFILE_TYPE == -1: this function opens its own
+		// induction_arrow_*_iterN.vtk directly (unlike the other vtk
+		// writers, it does not go through OutputFiles::openVTKFile()), so
+		// it needs its own explicit guard.
+		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+		// (Anthropic), 2026-09-14.
 		return;
 	}
 

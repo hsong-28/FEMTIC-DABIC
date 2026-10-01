@@ -316,6 +316,14 @@ bool AnalysisControl::writeBinaryFormat() const
 	return m_binaryOutput;
 }
 
+// Get flag specifing whether per-iteration csv/vtk diagnostic output is
+// suppressed (OFILE_TYPE == -1). See the declaration in AnalysisControl.h.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-14.
+bool AnalysisControl::suppressCsvVtkOutput() const
+{
+	return m_suppressCsvVtkOutput;
+}
+
 int AnalysisControl::getDegreeOfLpMinimumNorm() const
 {
 	return m_degreeOfLpMinimumNorm;

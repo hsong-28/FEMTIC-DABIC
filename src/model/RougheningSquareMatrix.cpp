@@ -228,7 +228,7 @@ void RougheningSquareMatrix::calcSingularValues() const{
 
 	assert(!m_matrixTripletFormat);
 
-	long long int lda = m_numRows;
+	MKL_INT lda = static_cast<MKL_INT>(m_numRows);
 	double* a = new double[lda*m_numRows];
 	double* work = new double[m_numRows];
 	long long int* lwork = new long long int[m_numRows];
@@ -257,38 +257,38 @@ void RougheningSquareMatrix::calcSingularValues() const{
 			std::cout << "row col val : " << irow << " " << icol << " " << a[ icol + irow * m_numRows ] << std::endl;
 		}
 	}
-	long long int m_numRows_64 = static_cast<long long int>(m_numRows);
+	const MKL_INT m_numRows_mkl = static_cast<MKL_INT>(m_numRows);
 
-	LAPACKE_dgebrd( LAPACK_ROW_MAJOR, m_numRows_64, m_numRows_64, a, lda, d, e, tauq, taup );
+	LAPACKE_dgebrd( LAPACK_ROW_MAJOR, m_numRows_mkl, m_numRows_mkl, a, lda, d, e, tauq, taup );
 	
-	long long int ncvt= 0;
-	long long int nru = 0;
-	long long int ncc = 0;
-	long long int ldvt = m_numRows_64;
-	long long int ldu = m_numRows_64;
-	long long int ldc = m_numRows_64;
+	MKL_INT ncvt= 0;
+	MKL_INT nru = 0;
+	MKL_INT ncc = 0;
+	MKL_INT ldvt = m_numRows_mkl;
+	MKL_INT ldu = m_numRows_mkl;
+	MKL_INT ldc = m_numRows_mkl;
 	double* vt = NULL;
 	double* u = NULL;
 	double* c = NULL;
 	double* q = NULL;
-	//long long int* iq = NULL;//2024/10
-	long long int* iq = NULL;//2024/10
-	//LAPACKE_dbdsqr( LAPACK_ROW_MAJOR, 'U', m_numRows_64, ncvt, nru, ncc, d, e, vt, ldvt, u, ldu, c, ldc );
-	LAPACKE_dbdsdc( LAPACK_ROW_MAJOR, 'U', 'N', m_numRows_64, d, e, u, ldu, vt, ldvt, q, iq );
+	//MKL_INT* iq = NULL;//2024/10
+	MKL_INT* iq = NULL;//2024/10
+	//LAPACKE_dbdsqr( LAPACK_ROW_MAJOR, 'U', m_numRows_mkl, ncvt, nru, ncc, d, e, vt, ldvt, u, ldu, c, ldc );
+	LAPACKE_dbdsdc( LAPACK_ROW_MAJOR, 'U', 'N', m_numRows_mkl, d, e, u, ldu, vt, ldvt, q, iq );
 
 	std::ofstream fout( "singularvalues.txt" );
 	fout.precision(6);
-	for( long long int irow = 0; irow < m_numRows_64; ++irow ){		;
+	for( long long int irow = 0; irow < m_numRows_mkl; ++irow ){		;
 		fout << "row d : " << irow << std::setw(15) << std::scientific << d[irow] << std::endl;
 	}	
 
 	std::vector<double> valuesAbs;
-	for( long long int irow = 0; irow < m_numRows_64; ++irow ){
+	for( long long int irow = 0; irow < m_numRows_mkl; ++irow ){
 		valuesAbs.push_back(std::abs(d[irow]));
 	}	
 
 	std::sort(valuesAbs.begin(), valuesAbs.end());
-	for( long long int irow = 0; irow < m_numRows_64; ++irow ){		;
+	for( long long int irow = 0; irow < m_numRows_mkl; ++irow ){		;
 		fout << "row abs(d) : " << irow << std::setw(15) << std::scientific << valuesAbs[irow] << std::endl;
 	}	
 
@@ -312,7 +312,7 @@ void RougheningSquareMatrix::calcEigenValues() const{
 
 	assert(!m_matrixTripletFormat);
 
-	long long int m_numRows_64 = static_cast<long long int>(m_numRows);
+	const MKL_INT m_numRows_mkl = static_cast<MKL_INT>(m_numRows);
 	double* ap = NULL;
 	double* d = NULL;
 	double* e = NULL;
@@ -344,22 +344,22 @@ void RougheningSquareMatrix::calcEigenValues() const{
 		}
 	}	
 
-	LAPACKE_dsptrd( LAPACK_ROW_MAJOR, 'U', m_numRows_64, ap, d, e, tau );
-	LAPACKE_dsterf( m_numRows_64, d, e );
+	LAPACKE_dsptrd( LAPACK_ROW_MAJOR, 'U', m_numRows_mkl, ap, d, e, tau );
+	LAPACKE_dsterf( m_numRows_mkl, d, e );
 
 	std::ofstream fout( "eigenvalues.txt" );
 	fout.precision(6);
-	for( long long int irow = 0; irow < m_numRows_64; ++irow ){		;
+	for( long long int irow = 0; irow < m_numRows_mkl; ++irow ){		;
 		fout << "row d : " << irow << std::setw(15) << std::scientific << d[irow] << std::endl;
 	}	
 
 	std::vector<double> valuesAbs;
-	for( long long int irow = 0; irow < m_numRows_64; ++irow ){
+	for( long long int irow = 0; irow < m_numRows_mkl; ++irow ){
 		valuesAbs.push_back(std::abs(d[irow]));
 	}	
 
 	std::sort(valuesAbs.begin(), valuesAbs.end());
-	for( long long int irow = 0; irow < m_numRows_64; ++irow ){		;
+	for( long long int irow = 0; irow < m_numRows_mkl; ++irow ){		;
 		fout << "row abs(d) : " << irow << std::setw(15) << std::scientific << valuesAbs[irow] << std::endl;
 	}	
 	

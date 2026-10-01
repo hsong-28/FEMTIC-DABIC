@@ -41,7 +41,7 @@ public:
 	virtual ~InversionGaussNewtonDataSpaceLCurve();
 
 	// Perform inversion
-	virtual void inversionCalculation();
+	virtual void inversionCalculation( const bool writeJacobianHDF5 = false );
 
 	// Perform inversion by the new method
 	void inversionCalculationByNewMethod() const;

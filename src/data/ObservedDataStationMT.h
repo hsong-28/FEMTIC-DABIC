@@ -31,6 +31,7 @@
 #include "Forward3D.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of MT station
 class ObservedDataStationMT: public ObservedDataStationPoint{
@@ -156,6 +157,38 @@ class ObservedDataStationMT: public ObservedDataStationPoint{
 
 		// Get full updated value of distortion parameters
 		double getDistortionParamsUpdatedFull( const int iComp ) const;
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		std::complex<double> getZxxObserved(const int i) const { return m_ZxxObserved[i]; }
+		std::complex<double> getZxyObserved(const int i) const { return m_ZxyObserved[i]; }
+		std::complex<double> getZyxObserved(const int i) const { return m_ZyxObserved[i]; }
+		std::complex<double> getZyyObserved(const int i) const { return m_ZyyObserved[i]; }
+		double getZxxSDRe(const int i) const { return m_ZxxSD[i].realPart; }
+		double getZxxSDIm(const int i) const { return m_ZxxSD[i].imagPart; }
+		double getZxySDRe(const int i) const { return m_ZxySD[i].realPart; }
+		double getZxySDIm(const int i) const { return m_ZxySD[i].imagPart; }
+		double getZyxSDRe(const int i) const { return m_ZyxSD[i].realPart; }
+		double getZyxSDIm(const int i) const { return m_ZyxSD[i].imagPart; }
+		double getZyySDRe(const int i) const { return m_ZyySD[i].realPart; }
+		double getZyySDIm(const int i) const { return m_ZyySD[i].imagPart; }
+
+		// Collect this PE's calculated Impedance-tensor values for
+		// results_iterN.h5 (only for the frequencies this PE actually
+		// computed -- see FemticHDF5CalcTypes.h). Component order 0=Zxx
+		// 1=Zxy 2=Zyx 3=Zyy, matching OutputHDF5.cpp's /data row layout.
+		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
+		// (Anthropic), 2026-09-13.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	protected:
 		struct DistortionMatrixDifferences{

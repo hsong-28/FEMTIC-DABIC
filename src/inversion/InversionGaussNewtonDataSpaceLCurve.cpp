@@ -27,11 +27,18 @@
 #include "ResistivityBlock.h"
 #include "InversionGaussNewtonDataSpaceLCurve.h"
 #include "LCurveCubicSpline.h"
+#ifdef _HDF5_JAC
+#include "OutputHDF5.h"
+
+#endif // _HDF5_JAC
 #include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#ifdef _LINUX
+#include <unistd.h>
+#endif // _LINUX
 #include <cmath>
 #include <vector>
 
@@ -65,7 +72,7 @@ InversionGaussNewtonDataSpaceLCurve::~InversionGaussNewtonDataSpaceLCurve(){
 }
 
 // Perform inversion
-void InversionGaussNewtonDataSpaceLCurve::inversionCalculation(){
+void InversionGaussNewtonDataSpaceLCurve::inversionCalculation( const bool writeJacobianHDF5 ){
 
 	const bool useBLAS = true;
 
@@ -548,6 +555,102 @@ void InversionGaussNewtonDataSpaceLCurve::inversionCalculation(){
 		}
 #endif
 
+#ifdef _HDF5_JAC
+		//--- HDF5 Jacobian output (ported from femtic_v4_src, 2026-08-22) ---
+		// Only performed for the last iteration at which the Jacobian is
+		// computed (writeJacobianHDF5, set by AnalysisControl::run()), since
+		// Femtic Jacobians can be very large (2026-08-30).
+		if( writeJacobianHDF5 ){
+			double* errVecThisPE2 = new double[numDataThisPE];
+			for( int i = 0; i < numDataThisPE; ++i ) errVecThisPE2[i] = 0.0;
+			ptrObservedData->collectErrorVectorOfDataThisPE( errVecThisPE2 );
+			double* errVecTotal2 = nullptr;
+			if( myProcessID == 0 ) errVecTotal2 = new double[numDataTotal];
+			MPI_Gatherv( errVecThisPE2, numDataThisPE, MPI_DOUBLE,
+			             errVecTotal2, numDataLocal, numDataAccumulated, MPI_DOUBLE,
+			             0, MPI_COMM_WORLD );
+			delete [] errVecThisPE2;
+			if( myProcessID == 0 ){
+				const int nFreqTot = ptrObservedData->getTotalNumberOfDifferenetFrequencies();
+				const long long nD64j = static_cast<long long>(numDataTotal);
+				const long long nM64j = static_cast<long long>(numModel);
+				double* jacRM = new double[ nD64j * nM64j ];
+				for( long long k = 0; k < nD64j * nM64j; ++k ) jacRM[k] = 0.0;
+				long long offJ = 0;
+				// IMPORTANT (fixed 2026-09-12, after a real run crashed on
+				// this exact pattern in the plain InversionGaussNewtonDataSpace
+				// class): readSensitivityMatrix() below calls exit(1) on a
+				// missing/mismatched file, correct for its OTHER, load-bearing
+				// uses elsewhere in this class but wrong for this optional
+				// Jacobian dump -- a hard exit() on PE 0 alone does not
+				// cleanly shut down the MPI job; under mpirun every OTHER
+				// rank is SIGKILLed, discarding a run that may have taken
+				// hours. Each file's existence is checked here first, and
+				// the whole dump is skipped (with a warning, not a crash)
+				// if any is missing -- readSensitivityMatrix() itself is
+				// left untouched for its other call sites.
+				bool ok = true;
+				for( int iF = 0; ok && iF < nFreqTot; ++iF ){
+					std::ostringstream fnJ;
+					if( !ptrAnalysisControl->getDirectoryOfOutOfCoreFilesForSensitivityMatrix().empty() ){
+#ifdef _LINUX
+						fnJ << ptrAnalysisControl->getDirectoryOfOutOfCoreFilesForSensitivityMatrix() + "/";
+#else
+						fnJ << ptrAnalysisControl->getDirectoryOfOutOfCoreFilesForSensitivityMatrix() + "\\";
+#endif
+					}
+					fnJ << "sensMatFreq" << iF;
+					// Retry-with-backoff (added 2026-09-12; see comment in
+					// Inversion::assembleAndWriteJacobianToHDF5() for the
+					// reasoning -- same fix applied consistently everywhere
+					// this pattern occurs).
+					FILE* fpProbe = NULL;
+					for( int attempt = 0; attempt < 5 && fpProbe == NULL; ++attempt ){
+						fpProbe = fopen( fnJ.str().c_str(), "rb" );
+#ifdef _LINUX
+						if( fpProbe == NULL && attempt < 4 ) usleep( 200000 ); // 200 ms
+#endif // _LINUX
+					}
+					if( fpProbe == NULL ){
+						OutputFiles::m_logFile << "# Warning: could not open " << fnJ.str()
+						                       << " while assembling jacobian.h5 for iteration "
+						                       << ptrAnalysisControl->getIterationNumCurrent()
+						                       << " -- skipping the Jacobian dump for this iteration"
+						                       << " (the rest of the run is unaffected)." << std::endl;
+						ok = false;
+						break;
+					}
+					fclose( fpProbe );
+					int nDFj(0), nMFj(0); double* sbJ = nullptr;
+					readSensitivityMatrix( fnJ.str(), nDFj, nMFj, sbJ );
+					if( nMFj != numModel || offJ + static_cast<long long>(nDFj) > nD64j ){
+						OutputFiles::m_logFile << "# Warning: " << fnJ.str()
+						                       << " is inconsistent with the expected Jacobian size"
+						                       << " -- skipping the Jacobian dump for iteration "
+						                       << ptrAnalysisControl->getIterationNumCurrent()
+						                       << " (the rest of the run is unaffected)." << std::endl;
+						delete [] sbJ;
+						ok = false;
+						break;
+					}
+					for( long long iD = 0; iD < static_cast<long long>(nDFj); ++iD )
+						for( long long iM = 0; iM < nM64j; ++iM )
+							jacRM[ (offJ+iD)*nM64j+iM ] = sbJ[ iD*nM64j+iM ];
+					delete [] sbJ;
+					offJ += static_cast<long long>(nDFj);
+				}
+				if( ok ){
+					outputJacobianToHDF5( ptrAnalysisControl->getIterationNumCurrent(),
+					                      numDataTotal, numModel, jacRM, errVecTotal2 );
+				}
+				delete [] jacRM;
+				delete [] errVecTotal2;
+			}
+		}
+		//--- end HDF5 Jacobian output ---
+
+#endif // _HDF5_JAC
+
 		//------------------------------------------------------------
 		// Calculate coefficient matrix
 		//------------------------------------------------------------
@@ -699,18 +802,19 @@ void InversionGaussNewtonDataSpaceLCurve::inversionCalculation(){
 			OutputFiles::m_logFile << "# Start numerical factorization for normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
 
 			const long long int numModel_64 = static_cast<long long int>(numModel);
+			const MKL_INT numDataTotal_mkl = static_cast<MKL_INT>(numDataTotal_64);
 			const bool positiveDefinite = ptrAnalysisControl->getPositiveDefiniteNormalEqMatrix();
-			long long int* ipiv = NULL;
+			MKL_INT* ipiv = NULL;
 			if (!positiveDefinite) {
-				ipiv = new long long int[numDataTotal_64];
+				ipiv = new MKL_INT[numDataTotal_64];
 			}
 
-			long long int ierr(0);
+			MKL_INT ierr(0);
 			if (positiveDefinite) {
-				ierr = LAPACKE_dpptrf(LAPACK_COL_MAJOR, 'L', numDataTotal_64, matrixToBeInverted);
+				ierr = LAPACKE_dpptrf_work(LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, matrixToBeInverted);
 			}
 			else {
-				ierr = LAPACKE_dsptrf(LAPACK_COL_MAJOR, 'L', numDataTotal_64, matrixToBeInverted, ipiv);
+				ierr = LAPACKE_dsptrf_work(LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, matrixToBeInverted, ipiv);
 			}
 
 			if (ierr > 0) {
@@ -726,13 +830,13 @@ void InversionGaussNewtonDataSpaceLCurve::inversionCalculation(){
 			// Solver linear equation with lapack
 			//----------------------------------------------
 			OutputFiles::m_logFile << "# Start solve phase for normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
-			const long long int nrhs = 1;
-			const long long int ldb = numDataTotal_64;
+			const MKL_INT nrhs = 1;
+			const MKL_INT ldb = numDataTotal_mkl;
 			if (positiveDefinite) {
-				ierr = LAPACKE_dpptrs(LAPACK_COL_MAJOR, 'L', numDataTotal_64, nrhs, matrixToBeInverted, rhsVectorGlobal, ldb);
+				ierr = LAPACKE_dpptrs_work(LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, nrhs, matrixToBeInverted, rhsVectorGlobal, ldb);
 			}
 			else {
-				ierr = LAPACKE_dsptrs(LAPACK_COL_MAJOR, 'L', numDataTotal_64, nrhs, matrixToBeInverted, ipiv, rhsVectorGlobal, ldb);
+				ierr = LAPACKE_dsptrs_work(LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, nrhs, matrixToBeInverted, ipiv, rhsVectorGlobal, ldb);
 			}
 
 			if (ierr < 0) {

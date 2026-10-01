@@ -46,7 +46,7 @@ public:
 	virtual ~InversionGaussNewtonDataSpace_OCCAM();
 
 	// Perform inversion
-	virtual void inversionCalculation();
+	virtual void inversionCalculation( const bool writeJacobianHDF5 = false );
 
 	// Read sensitivity matrix
 	void readSensitivityMatrix( const std::string& fileName, int& numData, int& numModel, double*& sensitivityMatrix ) const;

@@ -21,11 +21,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
+// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-21
+// (ported _HDF5_JAC Jacobian output from femtic_v4_src).
+// Further modified (fixed MPI_Gatherv deadlock in the _HDF5_JAC
+// Jacobian-output block, present whenever numProcessTotal > 1 — flagged as
+// a known limitation when this code was ported, now fixed) by Volker Rath
+// (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-09.
 #include "ObservedData.h"
 #include "AnalysisControl.h"
 #include "OutputFiles.h"
 #include "ResistivityBlock.h"
 #include "InversionGaussNewtonModelSpace.h"
+#ifdef _HDF5_JAC
+#include "OutputHDF5.h"
+
+#endif // _HDF5_JAC
 #include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,7 +59,7 @@ InversionGaussNewtonModelSpace::~InversionGaussNewtonModelSpace(){
 }
 
 // Perform inversion
-void InversionGaussNewtonModelSpace::inversionCalculation(){
+void InversionGaussNewtonModelSpace::inversionCalculation( const bool writeJacobianHDF5 ){
 
 	// Get process ID and total process number
 	//int myProcessID(0);
@@ -128,8 +138,6 @@ void InversionGaussNewtonModelSpace::inversionCalculation(){
 	}
 #endif
 
-	delete [] numDataLocal;
-	delete [] displacements;
 	delete [] dataVectorThisPE;
 
 	ResistivityBlock* const ptrResistivityBlock = ResistivityBlock::getInstance();
@@ -140,6 +148,21 @@ void InversionGaussNewtonModelSpace::inversionCalculation(){
 
 	const long long int numModel_64 = static_cast<long long int>(numModel);
 	const long long int numDataTotal_64 = static_cast<long long int>(numDataTotal);
+
+#ifdef _HDF5_JAC
+	// Assemble and write jacobian.h5 via the shared implementation (see
+	// Inversion::assembleAndWriteJacobianToHDF5(), added 2026-09-11). This
+	// used to be done inline here (re-reading the sensMatFreq<N> files a
+	// second time, redundantly transposing to column-major and back), but
+	// is now shared with AnalysisControl::run()'s early-convergence path,
+	// which needs the exact same logic without the rest of this function's
+	// GN-solve machinery. COLLECTIVE: must be called by every PE (see its
+	// declaration in Inversion.h) -- writeJacobianHDF5 is identical on
+	// every PE, so this call is naturally made by all of them here.
+	if( writeJacobianHDF5 ){
+		assembleAndWriteJacobianToHDF5( ptrAnalysisControl->getIterationNumCurrent() );
+	}
+#endif // _HDF5_JAC
 
 	// If this PE number is zero -------------------------------------------------------
 	if( myProcessID == 0 ){
@@ -227,7 +250,7 @@ void InversionGaussNewtonModelSpace::inversionCalculation(){
 		//--------------------------------------------------
 
 		delete [] sensitivityMatrixBuf;
-	
+
 		const long long int numElemsOfCoefficientMatrix = numModel_64 * ( numModel_64 + 1 ) / 2;
 		OutputFiles::m_logFile << "# Total number of elements in coefficient matrix : " << numElemsOfCoefficientMatrix << std::endl;
 		double* matrixToBeInverted = new double[numElemsOfCoefficientMatrix];
@@ -394,17 +417,18 @@ void InversionGaussNewtonModelSpace::inversionCalculation(){
 		OutputFiles::m_logFile << "# Start numerical factorization for transformed normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
 
 		const bool positiveDefinite = ( AnalysisControl::getInstance() )->getPositiveDefiniteNormalEqMatrix();
-		lapack_int* ipiv = NULL;
+		const MKL_INT numModel_mkl = static_cast<MKL_INT>(numModel_64);
+		MKL_INT* ipiv = NULL;
 		if( !positiveDefinite ){
-			ipiv = new lapack_int[numModel];
+			ipiv = new MKL_INT[numModel];
 		}
 
-		long long int ierr(0);
+		MKL_INT ierr(0);
 		if( positiveDefinite ){
-			ierr = LAPACKE_dpptrf( LAPACK_COL_MAJOR, 'U', numModel_64, matrixToBeInverted );
+			ierr = LAPACKE_dpptrf_work( LAPACK_COL_MAJOR, 'U', numModel_mkl, matrixToBeInverted );
 		}
 		else{
-			ierr = LAPACKE_dsptrf( LAPACK_COL_MAJOR, 'U', numModel_64, matrixToBeInverted, ipiv );
+			ierr = LAPACKE_dsptrf_work( LAPACK_COL_MAJOR, 'U', numModel_mkl, matrixToBeInverted, ipiv );
 		}
 
 		if( ierr > 0 ) {
@@ -417,13 +441,13 @@ void InversionGaussNewtonModelSpace::inversionCalculation(){
 
 		// Solver linear equation with lapack
 		OutputFiles::m_logFile << "# Start solve phase for transformed normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
-		const long long int nrhs = 1;
-		const long long int ldb = numModel_64;
+		const MKL_INT nrhs = 1;
+		const MKL_INT ldb = numModel_mkl;
 		if( positiveDefinite ){
-			ierr = LAPACKE_dpptrs( LAPACK_COL_MAJOR, 'U', numModel_64, nrhs, matrixToBeInverted, rhsVector, ldb );
+			ierr = LAPACKE_dpptrs_work( LAPACK_COL_MAJOR, 'U', numModel_mkl, nrhs, matrixToBeInverted, rhsVector, ldb );
 		}
 		else{
-			ierr = LAPACKE_dsptrs( LAPACK_COL_MAJOR, 'U', numModel_64, nrhs, matrixToBeInverted, ipiv, rhsVector, ldb );
+			ierr = LAPACKE_dsptrs_work( LAPACK_COL_MAJOR, 'U', numModel_mkl, nrhs, matrixToBeInverted, ipiv, rhsVector, ldb );
 		}
 
 		if( ierr < 0 ){
@@ -471,6 +495,13 @@ void InversionGaussNewtonModelSpace::inversionCalculation(){
 		delete[] matrixToBeInverted;	
 	}
 	// If this PE number is zero -------------------------------------------------------
+
+	// numDataLocal/displacements were allocated on every PE (above) and are
+	// last used, on PE 0 only, inside the optional _HDF5_JAC block above;
+	// delete them here, unconditionally, after that block has gone out of
+	// scope (ported from femtic_v4_src, 2026-08-21).
+	delete [] numDataLocal;
+	delete [] displacements;
 
 	MPI_Bcast( rhsVector, numModel, MPI_DOUBLE, 0, MPI_COMM_WORLD );
 

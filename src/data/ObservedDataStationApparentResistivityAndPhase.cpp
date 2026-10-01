@@ -824,6 +824,35 @@ void ObservedDataStationApparentResistivityAndPhase::outputCalculatedValues() co
 
 }
 
+#ifdef _HDF5_OUT
+// Collect this PE's calculated apparent-resistivity/phase values for
+// results_iterN.h5.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
+void ObservedDataStationApparentResistivityAndPhase::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
+
+	int icount(0);
+	for( std::vector<int>::const_iterator itr = m_freqIDsAmongThisStationCalculatedByThisPE.begin(); itr != m_freqIDsAmongThisStationCalculatedByThisPE.end(); ++itr ){
+		const double cal[8] = {
+			m_apparentResistivityXXCalculated[icount], m_apparentResistivityXYCalculated[icount],
+			m_apparentResistivityYXCalculated[icount], m_apparentResistivityYYCalculated[icount],
+			m_PhaseXXCalculated[icount], m_PhaseXYCalculated[icount],
+			m_PhaseYXCalculated[icount], m_PhaseYYCalculated[icount]
+		};
+		for( int c = 0; c < 8; ++c ){
+			FemticHDF5CalcRow r;
+			r.site_id   = m_stationID;
+			r.datatype  = FemticHDF5::DTYPE_APP;
+			r.freq      = m_freq[*itr];
+			r.component = c;
+			r.cal_re    = cal[c];
+			r.cal_im    = 0.0;
+			rows.push_back(r);
+		}
+		++icount;
+	}
+}
+#endif // _HDF5_OUT
+
 // Calulate sensitivity matrix of apparent resistivity and phase
 void ObservedDataStationApparentResistivityAndPhase::calculateSensitivityMatrix( const double freq, const int nModel,
 	const ObservedDataStationPoint* const ptrStationOfMagneticField,
@@ -1439,3 +1468,51 @@ bool ObservedDataStationApparentResistivityAndPhase::isUsedImpedanceTensorFromFr
 	return false;
 
 }
+
+#ifdef _HDF5_JAC
+// Collect data-error (SD) vector in same slot order as residual vector
+// (ported from femtic_v4_src, 2026-08-21).
+void ObservedDataStationApparentResistivityAndPhase::collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const{
+
+	const int freqIDThisPEInSta = getFreqIDsAmongThisPE( freq );
+	if( freqIDThisPEInSta < 0 ) return;
+	const int freqIDGlobalInSta = m_freqIDsAmongThisStationCalculatedByThisPE[ freqIDThisPEInSta ];
+
+	const bool useZ = ( AnalysisControl::getInstance()->getApparentResistivityAndPhaseTreatmentOption()
+	                    == AnalysisControl::USE_Z_IF_SIGN_OF_RE_Z_DIFFER );
+
+	// XX
+	if( useZ && isUsedImpedanceTensorFromFreqIDs( freqIDThisPEInSta, ObservedDataStationMT::XX ) ){
+		vector[ offset + m_dataIDOfApparentResistivityXX[freqIDThisPEInSta] ] = m_ZxxSD[freqIDGlobalInSta].realPart;
+		vector[ offset + m_dataIDOfPhaseXX[freqIDThisPEInSta]               ] = m_ZxxSD[freqIDGlobalInSta].imagPart;
+	}else{
+		vector[ offset + m_dataIDOfApparentResistivityXX[freqIDThisPEInSta] ] = calcLog10ErrorOfApparentResistivity( freqIDGlobalInSta, ObservedDataStationMT::XX );
+		vector[ offset + m_dataIDOfPhaseXX[freqIDThisPEInSta]               ] = m_PhaseXXSD[freqIDGlobalInSta];
+	}
+	// XY
+	if( useZ && isUsedImpedanceTensorFromFreqIDs( freqIDThisPEInSta, ObservedDataStationMT::XY ) ){
+		vector[ offset + m_dataIDOfApparentResistivityXY[freqIDThisPEInSta] ] = m_ZxySD[freqIDGlobalInSta].realPart;
+		vector[ offset + m_dataIDOfPhaseXY[freqIDThisPEInSta]               ] = m_ZxySD[freqIDGlobalInSta].imagPart;
+	}else{
+		vector[ offset + m_dataIDOfApparentResistivityXY[freqIDThisPEInSta] ] = calcLog10ErrorOfApparentResistivity( freqIDGlobalInSta, ObservedDataStationMT::XY );
+		vector[ offset + m_dataIDOfPhaseXY[freqIDThisPEInSta]               ] = m_PhaseXYSD[freqIDGlobalInSta];
+	}
+	// YX
+	if( useZ && isUsedImpedanceTensorFromFreqIDs( freqIDThisPEInSta, ObservedDataStationMT::YX ) ){
+		vector[ offset + m_dataIDOfApparentResistivityYX[freqIDThisPEInSta] ] = m_ZyxSD[freqIDGlobalInSta].realPart;
+		vector[ offset + m_dataIDOfPhaseYX[freqIDThisPEInSta]               ] = m_ZyxSD[freqIDGlobalInSta].imagPart;
+	}else{
+		vector[ offset + m_dataIDOfApparentResistivityYX[freqIDThisPEInSta] ] = calcLog10ErrorOfApparentResistivity( freqIDGlobalInSta, ObservedDataStationMT::YX );
+		vector[ offset + m_dataIDOfPhaseYX[freqIDThisPEInSta]               ] = m_PhaseYXSD[freqIDGlobalInSta];
+	}
+	// YY
+	if( useZ && isUsedImpedanceTensorFromFreqIDs( freqIDThisPEInSta, ObservedDataStationMT::YY ) ){
+		vector[ offset + m_dataIDOfApparentResistivityYY[freqIDThisPEInSta] ] = m_ZyySD[freqIDGlobalInSta].realPart;
+		vector[ offset + m_dataIDOfPhaseYY[freqIDThisPEInSta]               ] = m_ZyySD[freqIDGlobalInSta].imagPart;
+	}else{
+		vector[ offset + m_dataIDOfApparentResistivityYY[freqIDThisPEInSta] ] = calcLog10ErrorOfApparentResistivity( freqIDGlobalInSta, ObservedDataStationMT::YY );
+		vector[ offset + m_dataIDOfPhaseYY[freqIDThisPEInSta]               ] = m_PhaseYYSD[freqIDGlobalInSta];
+	}
+}
+
+#endif // _HDF5_JAC

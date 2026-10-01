@@ -465,6 +465,31 @@ void ObservedDataStationHTF::outputCalculatedValues() const{
 	}
 }
 
+#ifdef _HDF5_OUT
+// Collect this PE's calculated HTF values for results_iterN.h5.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
+void ObservedDataStationHTF::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
+
+	int icount(0);
+	for( std::vector<int>::const_iterator itr = m_freqIDsAmongThisStationCalculatedByThisPE.begin(); itr != m_freqIDsAmongThisStationCalculatedByThisPE.end(); ++itr ){
+		const std::complex<double> cal[4] = {
+			m_TxxCalculated[icount], m_TxyCalculated[icount], m_TyxCalculated[icount], m_TyyCalculated[icount]
+		};
+		for( int c = 0; c < 4; ++c ){
+			FemticHDF5CalcRow r;
+			r.site_id   = m_stationID;
+			r.datatype  = FemticHDF5::DTYPE_HTF;
+			r.freq      = m_freq[*itr];
+			r.component = c;
+			r.cal_re    = cal[c].real();
+			r.cal_im    = cal[c].imag();
+			rows.push_back(r);
+		}
+		++icount;
+	}
+}
+#endif // _HDF5_OUT
+
 // Calulate sensitivity matrix of horizontal magnetic field transfer functions
 void ObservedDataStationHTF::calculateSensitivityMatrix( const double freq, const int nModel,
 	const ObservedDataStationPoint* const ptrStationOfMagneticField,
@@ -582,3 +607,24 @@ double ObservedDataStationHTF::calculateErrorSumOfSquaresThisPE() const{
 	return misfit;
 
 }
+
+#ifdef _HDF5_JAC
+// Collect data-error (SD) vector in same slot order as residual vector
+// (ported from femtic_v4_src, 2026-08-21).
+void ObservedDataStationHTF::collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const{
+
+	const int freqIDThisPEInSta = getFreqIDsAmongThisPE( freq );
+	if( freqIDThisPEInSta < 0 ) return;
+	const int freqIDGlobalInSta = m_freqIDsAmongThisStationCalculatedByThisPE[ freqIDThisPEInSta ];
+
+	vector[ offset + m_dataIDOfTxx[freqIDThisPEInSta].realPart ] = m_TxxSD[freqIDGlobalInSta].realPart;
+	vector[ offset + m_dataIDOfTxx[freqIDThisPEInSta].imagPart ] = m_TxxSD[freqIDGlobalInSta].imagPart;
+	vector[ offset + m_dataIDOfTxy[freqIDThisPEInSta].realPart ] = m_TxySD[freqIDGlobalInSta].realPart;
+	vector[ offset + m_dataIDOfTxy[freqIDThisPEInSta].imagPart ] = m_TxySD[freqIDGlobalInSta].imagPart;
+	vector[ offset + m_dataIDOfTyx[freqIDThisPEInSta].realPart ] = m_TyxSD[freqIDGlobalInSta].realPart;
+	vector[ offset + m_dataIDOfTyx[freqIDThisPEInSta].imagPart ] = m_TyxSD[freqIDGlobalInSta].imagPart;
+	vector[ offset + m_dataIDOfTyy[freqIDThisPEInSta].realPart ] = m_TyySD[freqIDGlobalInSta].realPart;
+	vector[ offset + m_dataIDOfTyy[freqIDThisPEInSta].imagPart ] = m_TyySD[freqIDGlobalInSta].imagPart;
+}
+
+#endif // _HDF5_JAC

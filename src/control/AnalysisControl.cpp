@@ -22,6 +22,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
+// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
+// Further modified (fixed MPI_Allreduce deadlock in HDF5 sensitivity
+// reduction — see comments around outputModelToHDF5() call) by Volker Rath
+// (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-09.
 #include <iostream>
 #include <sstream>
 #include <stdlib.h>
@@ -34,6 +38,10 @@
 #include "AppraisalRougheningState.h"
 #include "AnalysisControl.h"
 #include "ControlKeywords.h"
+#include "InputFileMap.h"
+#ifdef _HDF5_OUT
+#include "OutputHDF5.h"
+#endif // _HDF5_OUT
 #include "ResistivityBlock.h"
 #include "RougheningMatrix.h"
 #include "MeshData.h"
@@ -615,6 +623,7 @@ AnalysisControl::AnalysisControl() :
 									 m_divisionNumberOfMultipleRHSInForward(1),
 									 m_divisionNumberOfMultipleRHSInInversion(1),
 									 m_binaryOutput(true),
+								 m_suppressCsvVtkOutput(false),
 									 m_positiveDefiniteNormalEqMatrix(false),
 									 m_typeOfDistortion(AnalysisControl::DISTORTION_TYPE_UNDEFINED),
 									 m_inversionMethod(Inversion::GAUSS_NEWTON_MODEL_SPECE),
@@ -830,7 +839,6 @@ void AnalysisControl::run()
 	default:
 		OutputFiles::m_logFile << "Error : Type of inversion method is wrong  !! : " << getInversionMethod() << std::endl;
 		exit(1);
-		break;
 	}
 
 	//------------------------------------
@@ -994,15 +1002,37 @@ void AnalysisControl::run()
 			pResistivityBlock->outputResistivityDataToVTK();
 		}
 
-		if (m_iterationNumMax > iter && doesOutputToVTK(AnalysisControl::OUTPUT_SENSITIVITY))
-		{ // if output sensitivity
-			m_ptrInversion->allocateMemoryForSensitivityScalarValues();
-		}
-
 		int iCutBack = 0;
 		ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
 		for (; iCutBack <= m_numCutbackMax; ++iCutBack)
 		{
+			if (m_iterationNumMax > iter && ( doesOutputToVTK(AnalysisControl::OUTPUT_SENSITIVITY)
+				|| true // Inversion::calculateSensitivityMatrix() always accumulates
+				        // into m_sensitivityScalarValues now that
+				        // ResistivityBlock::outputSensitivityBlock() writes the
+				        // globally-reduced sensitivity into
+				        // sensitivity_iterN.dat / sensitivity_normalized_iterN.dat
+				        // unconditionally (added 2026-09-14) -- allocate here
+				        // unconditionally too, or that accumulation writes
+				        // through a NULL pointer. This also fixes a pre-existing
+				        // gap in this tree: results_iterN.h5's /model/sensitivity
+				        // (built with _HDF5_OUT) previously silently produced
+				        // nothing unless OUTPUT_SENSITIVITY was ALSO separately
+				        // set, since the femtic_v4_src/femtic_v5_src fix for
+				        // that (2026-09-09/13) was never ported here.
+				) )
+			{ // if output sensitivity, HDF5 model output, or the sensitivity .dat files
+				// Reset every retrial (fixed 2026-09-25): calculateSensitivityMatrix()
+				// always accumulates into m_sensitivityScalarValues, and
+				// calcForwardComputation() below runs once per retrial attempt, not
+				// once per iteration -- including the reuse-cached-forward-response
+				// branch, which still computes fresh sensitivity. Without re-zeroing
+				// here, a rejected retrial's contribution carried over and was summed
+				// with the next attempt's, so the reported sensitivity reflected
+				// every retrial tried this iteration, not just the accepted one.
+				m_ptrInversion->allocateMemoryForSensitivityScalarValues();
+			}
+
 			seticut(iCutBack);
 			OutputFiles::m_logFile << "###############################################################################" << std::endl;
 			OutputFiles::m_logFile << kLogStartForwardComputationPrefix << iter << ",  Retrial : " << iCutBack << std::endl;
@@ -1046,10 +1076,59 @@ void AnalysisControl::run()
 					calculateSensitivity,
 					this,
 					m_ptrInversion);
+#ifdef _HDF5_JAC
+				// Write jacobian.h5 here, right as this iteration's retrial
+				// loop succeeds (fixed 2026-09-12, redesigned at the user's
+				// request; same change ported to femtic_v4_src/v5_src): the
+				// sensitivity data calcForwardComputation(iter) just
+				// computed above is fresh and known-good the moment a
+				// retrial succeeds -- this is the same well-exercised code
+				// path that has already run correctly, without incident, on
+				// every earlier iteration of the run (confirmed via
+				// per-rank logs on a real crashed run). This replaces the
+				// previous design, which attempted the (expensive,
+				// collective) assembly separately at several different
+				// special termination events across this file -- retrial
+				// exhaustion, the data-fit-cooling early exit just below,
+				// the fifth exit near the end of this loop, and inside the
+				// TO_NONLINEAR_LCURVE/TO_DATA_FIT_COOLING trade-off
+				// dispatch blocks -- several iterations after the data was
+				// originally written in some of those cases, which is
+				// where a same-node file-visibility race was observed on a
+				// real run. Writing here, uniformly, for every trade-off
+				// mode (this point in the loop runs before any
+				// mode-specific dispatch), means (before the 2026-10-01 change below) jacobian.h5 was simply
+				// overwritten on every successful iteration, so it always
+				// reflects the most recently *accepted* model. All of the
+				// other call sites mentioned above have been removed --
+				// see ECOSYSTEM_STATUS.md for the full history.
+				// Changed 2026-10-01 (at the user's request): write exchange.h5
+				// only (a) at the last iteration for which sensitivity is
+				// computed, iter == ITERATION_NUM_MAX - 1 (doesCalculateSensitivity()
+				// is false at iter == ITERATION_NUM_MAX), or (b) at an early
+				// converged iteration. Previously it was rewritten at every
+				// accepted iteration. Both conditions are identical on all PEs
+				// (iter and the broadcast convergenceFlag), as the collective
+				// assembly requires.
+				if( calculateSensitivity &&
+				    ( convergenceFlag == AnalysisControl::INVERSIN_CONVERGED ||
+				      iter == m_iterationNumMax - 1 ) ){
+					m_ptrInversion->assembleAndWriteJacobianToHDF5( iter );
+				}
+#endif // _HDF5_JAC
 				break; // Go out of the loop
 			}
 			if (isDataFitCoolingMode() && m_stopAfterDataFitCooling)
 			{
+#ifdef _HDF5_JAC
+				// This trial did not succeed, so no fresh Jacobian is
+				// assembled here (fixed/simplified 2026-09-12): jacobian.h5
+				// already reflects the last iteration whose retrial DID
+				// succeed (written above), which is the correct artifact
+				// to keep.
+				OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
+			                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+#endif // _HDF5_JAC
 				break;
 			}
 
@@ -1080,12 +1159,32 @@ void AnalysisControl::run()
 			OutputFiles::m_logFile
 				<< "# Stop inversion loop because the selected full-step cooling response was not reproducible."
 				<< std::endl;
+#ifdef _HDF5_JAC
+			// This trial did not succeed, so no fresh Jacobian is assembled
+			// here (fixed/simplified 2026-09-12): jacobian.h5 already
+			// reflects the last iteration whose retrial DID succeed
+			// (written above, at the point convergenceFlag was accepted),
+			// which is the correct artifact to keep.
+			OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
+			                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+#endif // _HDF5_JAC
 			break;
 		}
 
 		if (iCutBack > m_numCutbackMax)
 		{
 			OutputFiles::m_logFile << "# Reach maximum retrial number." << std::endl;
+#ifdef _HDF5_JAC
+			// This trial did not succeed, so no fresh Jacobian is assembled
+			// here (fixed/simplified 2026-09-12, at the user's request):
+			// jacobian.h5 already reflects the last iteration whose retrial
+			// DID succeed (written above), which is the correct artifact
+			// to keep -- attempting a new assembly from this failed
+			// retrial's data is both unnecessary and was the source of a
+			// same-node file-visibility race observed on a real run.
+			OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
+			                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+#endif // _HDF5_JAC
 			break;
 		}
 
@@ -1096,6 +1195,43 @@ void AnalysisControl::run()
 		ptrOutputFiles->openCsvFileFor3DFwd(iter);
 		// Output results
 		pObservedData->outputCalculatedValuesOfAllStations();
+
+#ifdef _HDF5_OUT
+		// --- HDF5 calculated-value gather (added 2026-09-13; ported from
+		// femtic_v4_src) ---
+		// Calculation is frequency-partitioned across PEs (same reason the
+		// sensitivity reduction just below must be collective), so
+		// results_iterN.h5's /data group needs an MPI_Gatherv onto PE 0 --
+		// collectively, on EVERY PE, right after
+		// outputCalculatedValuesOfAllStations() has populated this PE's Cal
+		// arrays for this iteration. This must NEVER be gated on
+		// myProcessID==0 -- that is exactly the class of deadlock fixed
+		// 2026-09-09 for getSensitivityScalarValuesReduced() below, and the
+		// same MPI_Gatherv pattern used there is reused here.
+		std::vector<FemticHDF5CalcRow> calcRowsThisPE;
+		pObservedData->collectCalculatedValuesForHDF5( calcRowsThisPE );
+
+		const int numProcessTotalForCalc = getTotalPE();
+		const int nRowsThisPE = (int)calcRowsThisPE.size();
+		std::vector<int> calcCountsAll( numProcessTotalForCalc );
+		MPI_Allgather( &nRowsThisPE, 1, MPI_INT, calcCountsAll.data(), 1, MPI_INT, MPI_COMM_WORLD );
+
+		std::vector<int> calcByteCounts( numProcessTotalForCalc );
+		std::vector<int> calcByteDispls( numProcessTotalForCalc + 1, 0 );
+		for( int i = 0; i < numProcessTotalForCalc; ++i ){
+			calcByteCounts[i]  = calcCountsAll[i] * (int)sizeof(FemticHDF5CalcRow);
+			calcByteDispls[i+1] = calcByteDispls[i] + calcByteCounts[i];
+		}
+		const int calcTotalBytes = calcByteDispls[numProcessTotalForCalc];
+
+		std::vector<FemticHDF5CalcRow> calcRowsAll;
+		if( myProcessID == 0 ){
+			calcRowsAll.resize( calcTotalBytes / (int)sizeof(FemticHDF5CalcRow) );
+		}
+		MPI_Gatherv( calcRowsThisPE.data(), nRowsThisPE * (int)sizeof(FemticHDF5CalcRow), MPI_BYTE,
+		             myProcessID == 0 ? calcRowsAll.data() : NULL, calcByteCounts.data(), calcByteDispls.data(), MPI_BYTE,
+		             0, MPI_COMM_WORLD );
+#endif // _HDF5_OUT
 
 		// Output resistivity model
 		if (writeBinaryFormat())
@@ -1110,14 +1246,70 @@ void AnalysisControl::run()
 			pResistivityBlock->outputResistivityValuesToVTK();
 		}
 
+		// --- Sensitivity reduction (fixed 2026-09-09; made unconditional
+		// 2026-09-14) ---
+		// MPI_Allreduce is a collective call: EVERY PE must invoke it, so it
+		// cannot live inside the "myProcessID == 0" block below. The
+		// previous code called Inversion::getSensitivityScalarValuesReduced()
+		// (which internally does MPI_Allreduce) only from PE 0's branch;
+		// every other PE never reached a matching Allreduce, so PE 0 blocked
+		// forever the moment it tried to write model_iterN.h5 with
+		// sensitivity data. This looked like the run being "stuck in
+		// iteration 1" and, as a direct consequence, outputDataToHDF5()
+		// (called right after, also only on PE 0) was never reached either,
+		// so data_iterN.h5 was never written. Fix: do the reduction here,
+		// collectively, on every PE, before branching on myProcessID; only
+		// PE 0 will actually use the result. (Same fix as femtic_v4_src /
+		// femtic_v5_src.)
+		// Originally _HDF5_OUT-only (hence the old name,
+		// sensReducedForHDF5); now also consumed unconditionally by
+		// ResistivityBlock::outputSensitivityBlock() below, which writes
+		// the same two sensitivity values (raw and volume-normalised) that
+		// outputResultsToHDF5() (when built with _HDF5_OUT) writes into
+		// /model/sensitivity, into their own sensitivity_iterN.dat /
+		// sensitivity_normalized_iterN.dat files -- see that function's
+		// changelog, 2026-09-14.
+		double* sensReducedForOutput = NULL;
+		if( iter > m_iterationNumInit && doesCalculateSensitivity(iter) ){
+			sensReducedForOutput = m_ptrInversion->getSensitivityScalarValuesReduced();
+		}
+
 		if (myProcessID == 0 && iter > m_iterationNumInit)
 		{ // If this PE number is zero and iteration number is not the first one
 			pResistivityBlock->outputResisitivityBlock(iter);
+			if( sensReducedForOutput != NULL ){
+				// Unlike the resistivity file above, these two are only
+				// written for iterations where sensitivity was actually
+				// computed -- see outputSensitivityBlock()'s header
+				// comment for why a stable per-iteration file isn't
+				// wanted here.
+				pResistivityBlock->outputSensitivityBlock( iter, sensReducedForOutput );
+			}
 			pResistivityBlock->output3DResistivity(iter);
 			if (estimateDistortionMatrix())
 			{
 				pObservedData->outputDistortionParams(iter);
 			}
+#ifdef _HDF5_OUT
+			// --- HDF5 output (ported from femtic_v4_src, 2026-08-21; merged
+			// into one results_iterN.h5 with calculated values added,
+			// 2026-09-13, also ported from femtic_v4_src) ---
+			// calcRowsAll was gathered collectively above, on every PE, and
+			// is only meaningful here on PE 0 -- outputResultsToHDF5()
+			// itself does nothing on any other PE (see its own PE-0 check).
+			// outputDistortionParams() above still writes
+			// distortion_iterN.dat separately/unchanged; outputResultsToHDF5()
+			// additionally embeds the same numbers in /distortion.
+			outputResultsToHDF5( iter, sensReducedForOutput, calcRowsAll );
+
+#endif // _HDF5_OUT
+		}
+
+		// Every PE allocated its own copy above (only PE 0's is ever
+		// written), so every PE must free its own copy here too.
+		if( sensReducedForOutput != NULL ){
+			delete [] sensReducedForOutput;
+			sensReducedForOutput = NULL;
 		}
 		if (iter > m_iterationNumInit && m_MinNormInv && m_typeOfReferenceModel == AnalysisControl::AfterAdjustment)
 		{
@@ -1161,6 +1353,9 @@ void AnalysisControl::run()
 		if (convergenceFlag == AnalysisControl::INVERSIN_CONVERGED)
 		{
 			OutputFiles::m_logFile << "# Converged." << std::endl;
+			// jacobian.h5 was already written above, at the point this
+			// iteration's retrial loop succeeded (see the comment there,
+			// 2026-09-12) -- no separate write is needed here.
 			break;
 		}
 
@@ -1173,6 +1368,16 @@ void AnalysisControl::run()
 		OutputFiles::m_logFile << "###############################################################################" << std::endl;
 		OutputFiles::m_logFile << "# Start Inversion.  Iteration : " << iter << std::endl;
 		OutputFiles::m_logFile << "###############################################################################" << std::endl;
+
+		// jacobian.h5 is now written directly above, right when each
+		// iteration's retrial loop succeeds (see comment there,
+		// 2026-09-12), which happens before inversionCalculation() (and
+		// the OCCAM/L-curve/ABIC/data-fit-cooling trade-off-search paths
+		// below) are ever called for that iteration -- so no further
+		// write is needed here. writeJacobianHDF5ThisIter is kept (always
+		// false) only because inversionCalculation()'s signature still
+		// takes the parameter; every caller below is otherwise unchanged.
+		const bool writeJacobianHDF5ThisIter = false;
 
 		ObservedData *const ptrObservedData = ObservedData::getInstance();
 		ptrResistivityBlock->copyResistivityValuesNotFixedCurToPre(); //
@@ -1195,7 +1400,7 @@ void AnalysisControl::run()
 						}
 					}
 					// m_tradeOffParameterForResistivityValue = m_tradeOffParameterForResistivityValue;
-					m_ptrInversion->inversionCalculation();
+					m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 				}
 				else if (m_typeOfTradeOffParam == AnalysisControl::TO_ABIC_LS)
 				{
@@ -1430,7 +1635,7 @@ void AnalysisControl::run()
 							count += +1;
 							m_stepLengthDampingFactorCur = (1.0 / pow(2.0, count)) * m_stepLengthDampingFactorPre;
 							m_stepsizeub = m_stepLengthDampingFactorCur;
-							m_ptrInversion->inversionCalculation();
+							m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 							m_ABICub = m_ptrInversion->getabic();
 						} // after this loop, m_ABICub >= m_tolreq; m_tradeOffParameterABICub > m_tradeOffParameterABIClb.
 						if (myProcessID == 0)
@@ -1469,7 +1674,7 @@ void AnalysisControl::run()
 					{
 						std::cout << " # Entering linear cubic-spline L-curve selection (Difference Filter)." << std::endl;
 					}
-					m_ptrInversion->inversionCalculation();
+					m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 					if (myProcessID == 0)
 					{
 						const double selectedTradeOff = m_ptrInversion->getAlphawithmaxc();
@@ -1486,7 +1691,15 @@ void AnalysisControl::run()
 					runNonlinearLCurveDiagnostics(m_iterationNumCurrent, "Difference Filter");
 					if (!m_stopAfterNonlinearLCurveDiagnostics)
 					{
-						m_ptrInversiondataspace->inversionCalculation();
+						// writeJacobianHDF5ThisIter is always false now
+						// (2026-09-12 redesign: jacobian.h5 is written
+						// uniformly at the point this iteration's retrial
+						// loop succeeds, before this dispatch ever runs --
+						// see that comment). This call is kept exactly as
+						// it was for everything else it does; passing the
+						// flag through remains harmless now that it is
+						// always false.
+						m_ptrInversiondataspace->inversionCalculation( writeJacobianHDF5ThisIter );
 					}
 				}
 				else if (m_typeOfTradeOffParam == AnalysisControl::TO_DATA_FIT_COOLING)
@@ -1499,6 +1712,11 @@ void AnalysisControl::run()
 					{
 						m_stopAfterDataFitCooling = !runPersistentDataFitCoolingAlpha();
 					}
+					// jacobian.h5 is written uniformly for every trade-off
+					// mode at the point this iteration's retrial loop
+					// succeeds (see comment there, 2026-09-12) -- no
+					// separate handling is needed here regardless of which
+					// alpha ends up selected by the calls above.
 				}
 				const double modelRoughness = ptrResistivityBlock->calcModelRoughnessForDifferenceFilter();
 				OutputFiles::m_logFile << "# Model-roughness is changed from " << modelRoughnessPre << " to " << modelRoughness << std::endl;
@@ -1518,7 +1736,7 @@ void AnalysisControl::run()
 			if (m_typeOfTradeOffParam == AnalysisControl::TO_Fixed)
 			{
 				// m_tradeOffParameterForResistivityValue = m_tradeOffParameterForResistivityValue;
-				m_ptrInversion->inversionCalculation();
+				m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			}
 			else if (m_typeOfTradeOffParam == AnalysisControl::TO_ABIC_LS)
 			{
@@ -1752,7 +1970,7 @@ void AnalysisControl::run()
 						}
 						m_stepLengthDampingFactorCur = (1.0 / pow(2.0, count)) * m_stepLengthDampingFactorPre;
 						m_stepsizeub = m_stepLengthDampingFactorCur;
-						m_ptrInversion->inversionCalculation();
+						m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 						m_ABICub = m_ptrInversion->getabic();
 						count += +1;
 					} // after this loop, m_rmsOCCub >= m_tolreq; m_tradeOffParameterOCCub > m_tradeOffParameterOCClb.
@@ -1792,7 +2010,7 @@ void AnalysisControl::run()
 				{
 					std::cout << " # Entering linear cubic-spline L-curve selection (Laplacian Filter)." << std::endl;
 				}
-				m_ptrInversion->inversionCalculation();
+				m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 				if (myProcessID == 0)
 				{
 					const double selectedTradeOff = m_ptrInversion->getAlphawithmaxc();
@@ -1809,7 +2027,11 @@ void AnalysisControl::run()
 				runNonlinearLCurveDiagnostics(m_iterationNumCurrent, "Laplacian Filter");
 				if (!m_stopAfterNonlinearLCurveDiagnostics)
 				{
-					m_ptrInversiondataspace->inversionCalculation();
+					// writeJacobianHDF5ThisIter is always false now (see
+					// the matching comment in the "Difference Filter"
+					// branch above, and the 2026-09-12 redesign note where
+					// it is defined).
+					m_ptrInversiondataspace->inversionCalculation( writeJacobianHDF5ThisIter );
 				}
 			}
 			else if (m_typeOfTradeOffParam == AnalysisControl::TO_DATA_FIT_COOLING)
@@ -1822,6 +2044,11 @@ void AnalysisControl::run()
 				{
 					m_stopAfterDataFitCooling = !runPersistentDataFitCoolingAlpha();
 				}
+				// jacobian.h5 is written uniformly for every trade-off
+				// mode at the point this iteration's retrial loop
+				// succeeds (see comment there, 2026-09-12) -- no
+				// separate handling is needed here regardless of which
+				// alpha ends up selected by the calls above.
 			}
 		}
 		if (m_stopAfterNonlinearLCurveDiagnostics || m_stopAfterDataFitCooling)
@@ -1829,6 +2056,11 @@ void AnalysisControl::run()
 			OutputFiles::m_logFile << (m_stopAfterDataFitCooling
 				? "# Stop inversion loop because data-fit cooling found no acceptable full-step alpha."
 				: "# Stop inversion loop after nonlinear L-curve diagnostics.") << std::endl;
+			// jacobian.h5 was already written above, at the point this same
+			// iteration's retrial loop succeeded -- this stop decision is
+			// made afterward, by the trade-off-parameter dispatch, but the
+			// model itself was not changed in between, so no separate
+			// write is needed here (fixed/simplified 2026-09-12).
 			break;
 		}
 		m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
@@ -1873,13 +2105,61 @@ void AnalysisControl::run()
 void AnalysisControl::inputControlData()
 {
 
-	std::ifstream inFile("control.dat", std::ios::in);
-	if (inFile.fail())
+	#ifdef _INPUT_FILE_MAP
+	const std::string controlFileName = InputFileMap::resolve("control", "control.dat");
+	#else
+	const std::string controlFileName = InputFileMap::findOnDisk("control.dat");
+	#endif
+
+	std::ifstream rawFile(controlFileName.c_str(), std::ios::in);
+	if (rawFile.fail())
 	{
-		// std::cerr << "File open error : control.dat !!" << std::endl;
-		OutputFiles::m_logFile << "File open error : control.dat !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << controlFileName << " !!" << std::endl;
 		exit(1);
 	}
+
+	// Strip lines beginning with '#' (allowing leading whitespace) as comments before parsing
+	std::string controlBuffer;
+	{
+		std::string rawLine;
+		while (std::getline(rawFile, rawLine))
+		{
+			const std::string::size_type firstNonSpace = rawLine.find_first_not_of(" \t\r\n");
+			if (firstNonSpace != std::string::npos && rawLine[firstNonSpace] == '#')
+			{
+				continue;
+			}
+			controlBuffer += rawLine;
+			controlBuffer += '\n';
+		}
+	}
+	rawFile.close();
+
+	std::istringstream inFile(controlBuffer);
+
+	// Rewind the stream to the beginning so keywords can be searched in any order
+	auto resetStream = [&inFile]()
+	{
+		inFile.clear();
+		inFile.seekg(0);
+	};
+
+	// Rewind and scan token-by-token for a keyword, leaving the stream positioned
+	// immediately after the matching token so the associated value(s) can be read
+	auto seekKeyword = [&inFile, &resetStream](const std::string &keyword, const std::string::size_type len) -> bool
+	{
+		resetStream();
+		std::string token;
+		while (inFile >> token)
+		{
+			if (token.substr(0, len).compare(keyword) == 0)
+			{
+				return true;
+			}
+		}
+		resetStream();
+		return false;
+	};
 
 	// Flag specifing whether each parameter has already read from control.dat
 	bool hasAlreadyRead[numParamWrittenInControlFile];
@@ -1887,1048 +2167,1091 @@ void AnalysisControl::inputControlData()
 
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
 
-	while (!inFile.eof())
+	double dbuf(0.0);
+	int ibuf(0);
+
+	if (seekKeyword("BOUNDARY_CONDITION_BOTTOM", 25))
+	{ // Read the type of boundary condition at the bottom of the model
+		const int paramID = AnalysisControl::BOUNDARY_CONDITION_BOTTOM;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOUNDARY_CONDITION_BOTTOM");
+		inFile >> ibuf;
+		if (ibuf != AnalysisControl::BOUNDARY_BOTTOM_ONE_DIMENSIONAL &&
+			ibuf != AnalysisControl::BOUNDARY_BOTTOM_PERFECT_CONDUCTOR)
+		{
+			OutputFiles::m_logFile << "Error : Wrong type of boundary condition at the bottom of the model !! " << ibuf << "." << std::endl;
+			exit(1);
+		}
+		m_boundaryConditionBottom = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("MESH_TYPE", 9))
+	{ // Type of mesh
+		const int paramID = AnalysisControl::MESH_TYPE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "MESH_TYPE");
+		inFile >> ibuf;
+		if (ibuf != MeshData::HEXA && ibuf != MeshData::TETRA && ibuf != MeshData::NONCONFORMING_HEXA)
+		{
+			OutputFiles::m_logFile << "Error : The number following MESH_TYPE must be " << MeshData::HEXA << ", " << MeshData::TETRA << " or " << MeshData::NONCONFORMING_HEXA << " !!" << std::endl;
+			exit(1);
+		}
+		m_typeOfMesh = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("NUM_THREADS", 11))
+	{ // Read total number of threads
+		const int paramID = AnalysisControl::NUM_THREADS;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "NUM_THREADS");
+		inFile >> ibuf;
+		if (ibuf < 0)
+		{
+			OutputFiles::m_logFile << "Error : Number of threads must be greater than or equals to 1 !! " << std::endl;
+			exit(1);
+		}
+		m_numThreads = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("FWD_SOLVER", 10))
 	{
-		std::string line;
-		inFile >> line;
 
-#ifdef _DEBUG_WRITE
-		std::cout << "line : " << line << std::endl;
-#endif
+		const int paramID = AnalysisControl::FWD_SOLVER;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "FWD_SOLVER");
+		inFile >> ibuf;
+		if (ibuf != PARDISOSolver::INCORE_MODE && ibuf != PARDISOSolver::SELECT_MODE_AUTOMATICALLY && ibuf != PARDISOSolver::OUT_OF_CORE_MODE)
+		{
+			OutputFiles::m_logFile << "Error : Parameter specifing the mode of forward solver must be 0, 1 or 2 !! " << ibuf << "." << std::endl;
+			exit(1);
+		}
+		m_modeOfPARDISO = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("MEM_LIMIT", 9))
+	{
 
-		double dbuf(0.0);
-		int ibuf(0);
-		if (line.substr(0, 25).compare("BOUNDARY_CONDITION_BOTTOM") == 0)
-		{ // Read the type of boundary condition at the bottom of the model
-			const int paramID = AnalysisControl::BOUNDARY_CONDITION_BOTTOM;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOUNDARY_CONDITION_BOTTOM");
-			inFile >> ibuf;
-			if (ibuf != AnalysisControl::BOUNDARY_BOTTOM_ONE_DIMENSIONAL &&
-				ibuf != AnalysisControl::BOUNDARY_BOTTOM_PERFECT_CONDUCTOR)
-			{
-				OutputFiles::m_logFile << "Error : Wrong type of boundary condition at the bottom of the model !! " << ibuf << "." << std::endl;
-				exit(1);
-			}
-			m_boundaryConditionBottom = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 9).compare("MESH_TYPE") == 0)
-		{ // Type of mesh
-			const int paramID = AnalysisControl::MESH_TYPE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "MESH_TYPE");
-			inFile >> ibuf;
-			if (ibuf != MeshData::HEXA && ibuf != MeshData::TETRA && ibuf != MeshData::NONCONFORMING_HEXA)
-			{
-				OutputFiles::m_logFile << "Error : The number following MESH_TYPE must be " << MeshData::HEXA << ", " << MeshData::TETRA << " or " << MeshData::NONCONFORMING_HEXA << " !!" << std::endl;
-				exit(1);
-			}
-			m_typeOfMesh = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 11).compare("NUM_THREADS") == 0)
-		{ // Read total number of threads
-			const int paramID = AnalysisControl::NUM_THREADS;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "NUM_THREADS");
-			inFile >> ibuf;
-			if (ibuf < 0)
-			{
-				OutputFiles::m_logFile << "Error : Number of threads must be greater than or equals to 1 !! " << std::endl;
-				exit(1);
-			}
-			m_numThreads = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 10).compare("FWD_SOLVER") == 0)
+		const int paramID = AnalysisControl::MEM_LIMIT;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "MEM_LIMIT");
+		inFile >> dbuf;
+		m_maxMemoryPARDISO = static_cast<int>(dbuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("NUMBERING_METHOD", 16))
+	{
+
+		const int paramID = AnalysisControl::NUMBERING_METHOD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "NUMBERING_METHOD");
+		inFile >> ibuf;
+		if (ibuf != AnalysisControl::NOT_ASSIGNED && ibuf != AnalysisControl::XYZ && ibuf != AnalysisControl::YZX && ibuf != AnalysisControl::ZXY)
 		{
-			const int paramID = AnalysisControl::FWD_SOLVER;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "FWD_SOLVER");
-			inFile >> ibuf;
-			if (ibuf != PARDISOSolver::INCORE_MODE && ibuf != PARDISOSolver::SELECT_MODE_AUTOMATICALLY && ibuf != PARDISOSolver::OUT_OF_CORE_MODE)
+			OutputFiles::m_logFile << "Error : Number of parameter specifing the way numbering must be -1, 0, 1 or 2 !!" << std::endl;
+			exit(1);
+		}
+		m_numberingMethod = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("OUTPUT_PARAM", 12))
+	{
+
+		const int paramID = AnalysisControl::OUTPUT_PARAM;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_PARAM");
+		int num(0);
+		inFile >> num;
+		if (num < 0)
+		{
+			OutputFiles::m_logFile << "Error : Number of parameter to be outputed to VTK is less than 0 !!" << std::endl;
+			exit(1);
+		}
+		else if (num > 0)
+		{
+			for (int i = 0; i < num; ++i)
 			{
-				OutputFiles::m_logFile << "Error : Parameter specifing the mode of forward solver must be 0, 1 or 2 !! " << ibuf << "." << std::endl;
+				inFile >> ibuf;
+				m_outputParametersForVis.insert(ibuf);
+			}
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("OUTPUT_OPTION", 16))
+	{
+
+		const int paramID = AnalysisControl::OUTPUT_OPTION;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_OPTION");
+		int ibufX(0);
+		int ibufY(0);
+		inFile >> ibufX >> ibufY;
+		if (ibufX == 0)
+		{
+			m_useBackwardOrForwardElement.directionX = AnalysisControl::BACKWARD_ELEMENT;
+		}
+		else
+		{
+			m_useBackwardOrForwardElement.directionX = AnalysisControl::FORWARD_ELEMENT;
+		}
+		if (ibufY == 0)
+		{
+			m_useBackwardOrForwardElement.directionY = AnalysisControl::BACKWARD_ELEMENT;
+		}
+		else
+		{
+			m_useBackwardOrForwardElement.directionY = AnalysisControl::FORWARD_ELEMENT;
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("OUTPUT_2D_RESULTS", 17))
+	{
+
+		const int paramID = AnalysisControl::OUTPUT_2D_RESULTS;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_2D_RESULTS");
+		m_isOutput2DResult = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ITERATION", 9))
+	{
+
+		const int paramID = AnalysisControl::ITERATION;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ITERATION");
+		inFile >> m_iterationNumInit >> m_iterationNumMax;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("DECREASE_THRESHOLD", 18))
+	{
+
+		const int paramID = AnalysisControl::DECREASE_THRESHOLD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DECREASE_THRESHOLD");
+		inFile >> m_thresholdValueForDecreasing;
+		if (m_thresholdValueForDecreasing < 0)
+		{
+			OutputFiles::m_logFile << "Error : Threshold value for determining if objective functional decrease must be positive." << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("CONVERGE", 8))
+	{
+
+		const int paramID = AnalysisControl::CONVERGE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "CONVERGE");
+		inFile >> m_decreaseRatioForConvegence;
+		if (m_decreaseRatioForConvegence < 0)
+		{
+			OutputFiles::m_logFile << "Error : Criterion for convergence must be positive." << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("RETRIAL", 7))
+	{
+
+		const int paramID = AnalysisControl::RETRIAL;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RETRIAL");
+		inFile >> m_numCutbackMax;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("STEP_LENGTH", 11))
+	{
+
+		const int paramID = AnalysisControl::STEP_LENGTH;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "STEP_LENGTH");
+		inFile >> m_stepLengthDampingFactorCur >> m_stepLengthDampingFactorMin >> m_stepLengthDampingFactorMax >> m_numOfIterIncreaseStepLength >> m_factorDecreasingStepLength >> m_factorIncreasingStepLength;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("DISTORTION", 10))
+	{
+
+		const int paramID = AnalysisControl::DISTORTION;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DISTORTION");
+		inFile >> ibuf;
+
+		if (ibuf != AnalysisControl::NO_DISTORTION &&
+			ibuf != AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE &&
+			ibuf != AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS &&
+			ibuf != AnalysisControl::ESTIMATE_GAINS_ONLY)
+		{
+			OutputFiles::m_logFile << "Error : Wrong type ID is specified below DISTORTION : " << ibuf << std::endl;
+			exit(1);
+		}
+		m_typeOfDistortion = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("WEIGHT_OF_DISTORTION", 20))
+	{
+
+
+		if (!hasAlreadyRead[AnalysisControl::DISTORTION])
+		{
+			OutputFiles::m_logFile << "Error : You must write DISTORTION data above WEIGHT_OF_DISTORTION" << std::endl;
+			exit(1);
+		}
+
+		const int paramID = AnalysisControl::WEIGHT_OF_DISTORTION;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "WEIGHT_OF_DISTORTION");
+
+		switch (m_typeOfDistortion)
+		{
+		case AnalysisControl::NO_DISTORTION:
+			break;
+		case AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE:
+			inFile >> m_tradeOffParameterForDistortionMatrixComplexity;
+			break;
+		case AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS:
+			inFile >> m_tradeOffParameterForDistortionGain >> m_tradeOffParameterForDistortionRotation;
+			break;
+		case AnalysisControl::ESTIMATE_GAINS_ONLY:
+			inFile >> m_tradeOffParameterForDistortionGain;
+			break;
+		default:
+			OutputFiles::m_logFile << "Error : Wrong type of distortion : " << ibuf << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("TYPE_OF_TRADE_OFF_PARAMETER", 27))
+	{
+
+		const int paramID = AnalysisControl::TYPE_OF_TRADE_OFF_PARAMETER;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TYPE_OF_TRADE_OFF_PARAMETER");
+		inFile >> ibuf;
+
+		if (!isKnownTradeOffParameterMode(ibuf))
+		{
+			OutputFiles::m_logFile << "Error : Wrong type ID is specified below TYPE_OF_TRADE_OFF_PARAMETER : " << ibuf << std::endl;
+			exit(1);
+		}
+		if (!isImplementedTradeOffParameterMode(ibuf))
+		{
+			OutputFiles::m_logFile
+				<< "Error : TYPE_OF_TRADE_OFF_PARAMETER " << ibuf
+				<< " (" << tradeOffParameterLabel(ibuf)
+				<< ") is recognized but not enabled in this maintained FEMTIC-DABIC branch yet."
+				<< " Supported values are 0 (fixed trade-off parameter), 1 (ABIC line search),"
+				<< " 2 (OCCAM line search), 3 (linear cubic-spline L-curve selection),"
+				<< " 4 (nonlinear cubic-spline L-curve selection),"
+				<< " and 5 (data-fit-bracketed cooling)."
+				<< std::endl;
+			exit(1);
+		}
+		m_typeOfTradeOffParam = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("TRADE_OFF_PARAM", 15))
+	{
+
+
+		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_TRADE_OFF_PARAMETER])
+		{
+			OutputFiles::m_logFile << "Error : You must write TYPE_OF_TRADE_OFF_PARAMETER data above TRADE_OFF_PARAM" << std::endl;
+			exit(1);
+		}
+		const int paramID = AnalysisControl::TRADE_OFF_PARAM;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TRADE_OFF_PARAM");
+		switch (m_typeOfTradeOffParam)
+		{
+		case AnalysisControl::TO_Fixed:
+			inFile >> m_tradeOffParameterForResistivityValue;
+			break;
+		case AnalysisControl::TO_ABIC_LS:
+			inFile >> m_tradeOffParameterForResistivityValue >> m_tolreq;
+			m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
+			break;
+		case AnalysisControl::TO_OCCAM_LS:
+			inFile >> m_tradeOffParameterForResistivityValue >> m_tolreq;
+			m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
+			break;
+		case AnalysisControl::TO_DATA_FIT_COOLING:
+			inFile >> m_dataFitCoolingInitialAlpha >> m_tolreq;
+			if (m_dataFitCoolingInitialAlpha <= 0.0)
+			{
+				OutputFiles::m_logFile << "Error : Data-fit cooling initial alpha must be positive." << std::endl;
 				exit(1);
 			}
-			m_modeOfPARDISO = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 9).compare("MEM_LIMIT") == 0)
-		{
-			const int paramID = AnalysisControl::MEM_LIMIT;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "MEM_LIMIT");
-			inFile >> dbuf;
-			m_maxMemoryPARDISO = static_cast<int>(dbuf);
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 16).compare("NUMBERING_METHOD") == 0)
-		{
-			const int paramID = AnalysisControl::NUMBERING_METHOD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "NUMBERING_METHOD");
-			inFile >> ibuf;
-			if (ibuf != AnalysisControl::NOT_ASSIGNED && ibuf != AnalysisControl::XYZ && ibuf != AnalysisControl::YZX && ibuf != AnalysisControl::ZXY)
+			if (m_tolreq <= 0.0)
 			{
-				OutputFiles::m_logFile << "Error : Number of parameter specifing the way numbering must be -1, 0, 1 or 2 !!" << std::endl;
+				OutputFiles::m_logFile << "Error : Data-fit cooling target RMS must be positive." << std::endl;
 				exit(1);
 			}
-			m_numberingMethod = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 12).compare("OUTPUT_PARAM") == 0)
+			m_tradeOffParameterForResistivityValue = m_dataFitCoolingInitialAlpha;
+			m_tradeOffParameterForResistivityValuePre = m_dataFitCoolingInitialAlpha;
+			break;
+		case AnalysisControl::TO_LINEAR_LCURVE:
 		{
-			const int paramID = AnalysisControl::OUTPUT_PARAM;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_PARAM");
-			int num(0);
-			inFile >> num;
-			if (num < 0)
+			int useLogLog = 0;
+			int useRootNorm = 0;
+			inFile >> m_NumOF_TO >> useLogLog >> useRootNorm;
+			if (m_NumOF_TO <= 0)
 			{
-				OutputFiles::m_logFile << "Error : Number of parameter to be outputed to VTK is less than 0 !!" << std::endl;
+				OutputFiles::m_logFile << "Error : Number of L-curve trade-off parameters must be positive : " << m_NumOF_TO << std::endl;
 				exit(1);
 			}
-			else if (num > 0)
+			if ((useLogLog != 0 && useLogLog != 1) || (useRootNorm != 0 && useRootNorm != 1))
 			{
-				for (int i = 0; i < num; ++i)
+				OutputFiles::m_logFile << "Error : L-curve loglog and norm flags must be 0 or 1." << std::endl;
+				exit(1);
+			}
+			m_lCurveUseLogLog = (useLogLog == 1);
+			m_lCurveUseRootNorm = (useRootNorm == 1);
+			if (m_tradeOffParameters != NULL)
+			{
+				delete[] m_tradeOffParameters;
+				m_tradeOffParameters = NULL;
+			}
+			m_tradeOffParameters = new double[m_NumOF_TO];
+			for (int i = 0; i < m_NumOF_TO; ++i)
+			{
+				inFile >> m_tradeOffParameters[i];
+				if (m_tradeOffParameters[i] <= 0.0)
 				{
-					inFile >> ibuf;
-					m_outputParametersForVis.insert(ibuf);
+					OutputFiles::m_logFile << "Error : L-curve trade-off parameter must be positive : " << m_tradeOffParameters[i] << std::endl;
+					exit(1);
 				}
 			}
-			hasAlreadyRead[paramID] = true;
+			m_tradeOffParameterForResistivityValue = m_tradeOffParameters[0];
+			m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
+			break;
 		}
-		else if (line.substr(0, 16).compare("OUTPUT_OPTION") == 0)
+		case AnalysisControl::TO_NONLINEAR_LCURVE:
 		{
-			const int paramID = AnalysisControl::OUTPUT_OPTION;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_OPTION");
-			int ibufX(0);
-			int ibufY(0);
-			inFile >> ibufX >> ibufY;
-			if (ibufX == 0)
+			const double alphaLowerBound = 0.1;
+			const double alphaUpperBound = 100.0;
+			double startAlpha = 0.0;
+			inFile >> startAlpha;
+			if (startAlpha <= 0.0)
 			{
-				m_useBackwardOrForwardElement.directionX = AnalysisControl::BACKWARD_ELEMENT;
-			}
-			else
-			{
-				m_useBackwardOrForwardElement.directionX = AnalysisControl::FORWARD_ELEMENT;
-			}
-			if (ibufY == 0)
-			{
-				m_useBackwardOrForwardElement.directionY = AnalysisControl::BACKWARD_ELEMENT;
-			}
-			else
-			{
-				m_useBackwardOrForwardElement.directionY = AnalysisControl::FORWARD_ELEMENT;
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 17).compare("OUTPUT_2D_RESULTS") == 0)
-		{
-			const int paramID = AnalysisControl::OUTPUT_2D_RESULTS;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_2D_RESULTS");
-			m_isOutput2DResult = true;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 20).compare("WEIGHT_OF_DISTORTION") == 0)
-		{
-
-			if (!hasAlreadyRead[AnalysisControl::DISTORTION])
-			{
-				OutputFiles::m_logFile << "Error : You must write DISTORTION data above WEIGHT_OF_DISTORTION" << std::endl;
+				OutputFiles::m_logFile << "Error : Nonlinear L-curve start trade-off parameter must be positive : " << startAlpha << std::endl;
 				exit(1);
 			}
-
-			const int paramID = AnalysisControl::WEIGHT_OF_DISTORTION;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "WEIGHT_OF_DISTORTION");
-
-			switch (m_typeOfDistortion)
-			{
-			case AnalysisControl::NO_DISTORTION:
-				break;
-			case AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE:
-				inFile >> m_tradeOffParameterForDistortionMatrixComplexity;
-				break;
-			case AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS:
-				inFile >> m_tradeOffParameterForDistortionGain >> m_tradeOffParameterForDistortionRotation;
-				break;
-			case AnalysisControl::ESTIMATE_GAINS_ONLY:
-				inFile >> m_tradeOffParameterForDistortionGain;
-				break;
-			default:
-				OutputFiles::m_logFile << "Error : Wrong type of distortion : " << ibuf << std::endl;
-				exit(1);
-				break;
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 9).compare("ITERATION") == 0)
-		{
-			const int paramID = AnalysisControl::ITERATION;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ITERATION");
-			inFile >> m_iterationNumInit >> m_iterationNumMax;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 18).compare("DECREASE_THRESHOLD") == 0)
-		{
-			const int paramID = AnalysisControl::DECREASE_THRESHOLD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DECREASE_THRESHOLD");
-			inFile >> m_thresholdValueForDecreasing;
-			if (m_thresholdValueForDecreasing < 0)
-			{
-				OutputFiles::m_logFile << "Error : Threshold value for determining if objective functional decrease must be positive." << std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 8).compare("CONVERGE") == 0)
-		{
-			const int paramID = AnalysisControl::CONVERGE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "CONVERGE");
-			inFile >> m_decreaseRatioForConvegence;
-			if (m_decreaseRatioForConvegence < 0)
-			{
-				OutputFiles::m_logFile << "Error : Criterion for convergence must be positive." << std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 7).compare("RETRIAL") == 0)
-		{
-			const int paramID = AnalysisControl::RETRIAL;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RETRIAL");
-			inFile >> m_numCutbackMax;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 11).compare("STEP_LENGTH") == 0)
-		{
-			const int paramID = AnalysisControl::STEP_LENGTH;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "STEP_LENGTH");
-			inFile >> m_stepLengthDampingFactorCur >> m_stepLengthDampingFactorMin >> m_stepLengthDampingFactorMax >> m_numOfIterIncreaseStepLength >> m_factorDecreasingStepLength >> m_factorIncreasingStepLength;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 10).compare("DISTORTION") == 0)
-		{
-			const int paramID = AnalysisControl::DISTORTION;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DISTORTION");
-			inFile >> ibuf;
-
-			if (ibuf != AnalysisControl::NO_DISTORTION &&
-				ibuf != AnalysisControl::ESTIMATE_DISTORTION_MATRIX_DIFFERENCE &&
-				ibuf != AnalysisControl::ESTIMATE_GAINS_AND_ROTATIONS &&
-				ibuf != AnalysisControl::ESTIMATE_GAINS_ONLY)
-			{
-				OutputFiles::m_logFile << "Error : Wrong type ID is specified below DISTORTION : " << ibuf << std::endl;
-				exit(1);
-				break;
-			}
-			m_typeOfDistortion = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 27).compare("TYPE_OF_TRADE_OFF_PARAMETER") == 0)
-		{
-			const int paramID = AnalysisControl::TYPE_OF_TRADE_OFF_PARAMETER;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TYPE_OF_TRADE_OFF_PARAMETER");
-			inFile >> ibuf;
-
-			if (!isKnownTradeOffParameterMode(ibuf))
-			{
-				OutputFiles::m_logFile << "Error : Wrong type ID is specified below TYPE_OF_TRADE_OFF_PARAMETER : " << ibuf << std::endl;
-				exit(1);
-				break;
-			}
-			if (!isImplementedTradeOffParameterMode(ibuf))
+			if (startAlpha < alphaLowerBound || startAlpha > alphaUpperBound)
 			{
 				OutputFiles::m_logFile
-					<< "Error : TYPE_OF_TRADE_OFF_PARAMETER " << ibuf
-					<< " (" << tradeOffParameterLabel(ibuf)
-					<< ") is recognized but not enabled in this maintained FEMTIC-DABIC branch yet."
-					<< " Supported values are 0 (fixed trade-off parameter), 1 (ABIC line search),"
-					<< " 2 (OCCAM line search), 3 (linear cubic-spline L-curve selection),"
-					<< " 4 (nonlinear cubic-spline L-curve selection),"
-					<< " and 5 (data-fit-bracketed cooling)."
-					<< std::endl;
+					<< "Error : Nonlinear L-curve start trade-off parameter must be within ["
+					<< alphaLowerBound << ", " << alphaUpperBound << "] : "
+					<< startAlpha << std::endl;
 				exit(1);
-				break;
 			}
-			m_typeOfTradeOffParam = ibuf;
+			std::vector<double> nonlinearAlphas;
+			for (double alpha = startAlpha;
+				alpha >= alphaLowerBound * (1.0 - 1.0e-10);
+				alpha /= std::sqrt(10.0))
+			{
+				nonlinearAlphas.push_back(std::max(alpha, alphaLowerBound));
+				if (alpha <= alphaLowerBound * (1.0 + 1.0e-10))
+				{
+					break;
+				}
+			}
+			if (nonlinearAlphas.empty() ||
+				nonlinearAlphas.back() > alphaLowerBound * (1.0 + 1.0e-8))
+			{
+				nonlinearAlphas.push_back(alphaLowerBound);
+			}
+			m_NumOF_TO = static_cast<int>(nonlinearAlphas.size());
+			m_lCurveUseLogLog = true;
+			m_lCurveUseRootNorm = true;
+			if (m_tradeOffParameters != NULL)
+			{
+				delete[] m_tradeOffParameters;
+				m_tradeOffParameters = NULL;
+			}
+			m_tradeOffParameters = new double[m_NumOF_TO];
+			for (int i = 0; i < m_NumOF_TO; ++i)
+			{
+				m_tradeOffParameters[i] = nonlinearAlphas[static_cast<std::vector<double>::size_type>(i)];
+			}
+			m_tradeOffParameterForResistivityValue = m_tradeOffParameters[0];
+			m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
+			break;
+		}
+		default:
+			OutputFiles::m_logFile << "Error : Wrong type of parameter selection scheme : " << ibuf << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("TYPE_OF_CG", 10))
+	{
+
+		const int paramID = AnalysisControl::TYPE_OF_CG;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TYPEOF_TO");
+		inFile >> ibuf;
+
+		if (ibuf != AnalysisControl::FD_CG &&
+			ibuf != AnalysisControl::CD_CG &&
+			ibuf != AnalysisControl::MS_CG)
+		{
+			OutputFiles::m_logFile << "Error : Wrong type ID is specified below TYPE_OF_CG : " << ibuf << std::endl;
+			exit(1);
+		}
+		m_typeOfCG = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("TRADE_OFF_CG", 12))
+	{
+
+		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_CG])
+		{
+			OutputFiles::m_logFile << "Error : You must write TYPE_OF_CG data above TRADE_OFF_CG" << std::endl;
+			exit(1);
+		}
+		const int paramID = AnalysisControl::TRADE_OFF_CG;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TRADE_OFF_CG");
+		switch (m_typeOfCG)
+		{
+		case AnalysisControl::FD_CG:
+			inFile >> m_tradeOffParameterForCrossGradient;
+			break;
+		case AnalysisControl::CD_CG:
+			inFile >> m_tradeOffParameterForCrossGradient;
+			break;
+		case AnalysisControl::MS_CG:
+			inFile >> m_tradeOffParameterForCrossGradient;
+			inFile >> m_smallvalueForCrossGradient;
+			break;
+		default:
+			OutputFiles::m_logFile << "Error : Wrong type of Cross-Gradient operator : " << ibuf << std::endl;
+			exit(1);
+		}
+		m_CrossGradientInv = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("TYPE_OF_REFERENCE", 17))
+	{
+
+		const int paramID = AnalysisControl::TYPE_OF_REFERENCE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "REFERENCE_MOD");
+		inFile >> m_typeOfReferenceModel;
+
+		if (m_typeOfReferenceModel < 0)
+		{
+			OutputFiles::m_logFile << "Error : 	m_typeOfReferenceModel must be an integer >=0 " << std::endl;
+			exit(1);
+		}
+		else
+		{
 			hasAlreadyRead[paramID] = true;
 		}
-		else if (line.substr(0, 15).compare("TRADE_OFF_PARAM") == 0)
-		{
+	}
+	if (seekKeyword("WEIGHT_OF_REFERENCE", 19))
+	{
 
-			if (!hasAlreadyRead[AnalysisControl::TYPE_OF_TRADE_OFF_PARAMETER])
-			{
-				OutputFiles::m_logFile << "Error : You must write TYPE_OF_TRADE_OFF_PARAMETER data above TRADE_OFF_PARAM" << std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::TRADE_OFF_PARAM;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TRADE_OFF_PARAM");
-			switch (m_typeOfTradeOffParam)
-			{
-			case AnalysisControl::TO_Fixed:
-				inFile >> m_tradeOffParameterForResistivityValue;
-				break;
-			case AnalysisControl::TO_ABIC_LS:
-				inFile >> m_tradeOffParameterForResistivityValue >> m_tolreq;
-				m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
-				break;
-			case AnalysisControl::TO_OCCAM_LS:
-				inFile >> m_tradeOffParameterForResistivityValue >> m_tolreq;
-				m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
-				break;
-			case AnalysisControl::TO_DATA_FIT_COOLING:
-				inFile >> m_dataFitCoolingInitialAlpha >> m_tolreq;
-				if (m_dataFitCoolingInitialAlpha <= 0.0)
-				{
-					OutputFiles::m_logFile << "Error : Data-fit cooling initial alpha must be positive." << std::endl;
-					exit(1);
-				}
-				if (m_tolreq <= 0.0)
-				{
-					OutputFiles::m_logFile << "Error : Data-fit cooling target RMS must be positive." << std::endl;
-					exit(1);
-				}
-				m_tradeOffParameterForResistivityValue = m_dataFitCoolingInitialAlpha;
-				m_tradeOffParameterForResistivityValuePre = m_dataFitCoolingInitialAlpha;
-				break;
-			case AnalysisControl::TO_LINEAR_LCURVE:
-			{
-				int useLogLog = 0;
-				int useRootNorm = 0;
-				inFile >> m_NumOF_TO >> useLogLog >> useRootNorm;
-				if (m_NumOF_TO <= 0)
-				{
-					OutputFiles::m_logFile << "Error : Number of L-curve trade-off parameters must be positive : " << m_NumOF_TO << std::endl;
-					exit(1);
-				}
-				if ((useLogLog != 0 && useLogLog != 1) || (useRootNorm != 0 && useRootNorm != 1))
-				{
-					OutputFiles::m_logFile << "Error : L-curve loglog and norm flags must be 0 or 1." << std::endl;
-					exit(1);
-				}
-				m_lCurveUseLogLog = (useLogLog == 1);
-				m_lCurveUseRootNorm = (useRootNorm == 1);
-				if (m_tradeOffParameters != NULL)
-				{
-					delete[] m_tradeOffParameters;
-					m_tradeOffParameters = NULL;
-				}
-				m_tradeOffParameters = new double[m_NumOF_TO];
-				for (int i = 0; i < m_NumOF_TO; ++i)
-				{
-					inFile >> m_tradeOffParameters[i];
-					if (m_tradeOffParameters[i] <= 0.0)
-					{
-						OutputFiles::m_logFile << "Error : L-curve trade-off parameter must be positive : " << m_tradeOffParameters[i] << std::endl;
-						exit(1);
-					}
-				}
-				m_tradeOffParameterForResistivityValue = m_tradeOffParameters[0];
-				m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
-				break;
-			}
-			case AnalysisControl::TO_NONLINEAR_LCURVE:
-			{
-				const double alphaLowerBound = 0.1;
-				const double alphaUpperBound = 100.0;
-				double startAlpha = 0.0;
-				inFile >> startAlpha;
-				if (startAlpha <= 0.0)
-				{
-					OutputFiles::m_logFile << "Error : Nonlinear L-curve start trade-off parameter must be positive : " << startAlpha << std::endl;
-					exit(1);
-				}
-				if (startAlpha < alphaLowerBound || startAlpha > alphaUpperBound)
-				{
-					OutputFiles::m_logFile
-						<< "Error : Nonlinear L-curve start trade-off parameter must be within ["
-						<< alphaLowerBound << ", " << alphaUpperBound << "] : "
-						<< startAlpha << std::endl;
-					exit(1);
-				}
-				std::vector<double> nonlinearAlphas;
-				for (double alpha = startAlpha;
-					alpha >= alphaLowerBound * (1.0 - 1.0e-10);
-					alpha /= std::sqrt(10.0))
-				{
-					nonlinearAlphas.push_back(std::max(alpha, alphaLowerBound));
-					if (alpha <= alphaLowerBound * (1.0 + 1.0e-10))
-					{
-						break;
-					}
-				}
-				if (nonlinearAlphas.empty() ||
-					nonlinearAlphas.back() > alphaLowerBound * (1.0 + 1.0e-8))
-				{
-					nonlinearAlphas.push_back(alphaLowerBound);
-				}
-				m_NumOF_TO = static_cast<int>(nonlinearAlphas.size());
-				m_lCurveUseLogLog = true;
-				m_lCurveUseRootNorm = true;
-				if (m_tradeOffParameters != NULL)
-				{
-					delete[] m_tradeOffParameters;
-					m_tradeOffParameters = NULL;
-				}
-				m_tradeOffParameters = new double[m_NumOF_TO];
-				for (int i = 0; i < m_NumOF_TO; ++i)
-				{
-					m_tradeOffParameters[i] = nonlinearAlphas[static_cast<std::vector<double>::size_type>(i)];
-				}
-				m_tradeOffParameterForResistivityValue = m_tradeOffParameters[0];
-				m_tradeOffParameterForResistivityValuePre = m_tradeOffParameterForResistivityValue;
-				break;
-			}
-			default:
-				OutputFiles::m_logFile << "Error : Wrong type of parameter selection scheme : " << ibuf << std::endl;
-				exit(1);
-				break;
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 10).compare("TYPE_OF_CG") == 0)
+		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_REFERENCE])
 		{
-			const int paramID = AnalysisControl::TYPE_OF_CG;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TYPEOF_TO");
-			inFile >> ibuf;
+			OutputFiles::m_logFile << "Error : You must write TYPE_OF_CG data above TRADE_OFF_CG" << std::endl;
+			exit(1);
+		}
+		const int paramID = AnalysisControl::WEIGHT_OF_REFERENCE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "REFERENCE_MOD");
+		inFile >> m_tradeOffParameterForMinNorm;
 
-			if (ibuf != AnalysisControl::FD_CG &&
-				ibuf != AnalysisControl::CD_CG &&
-				ibuf != AnalysisControl::MS_CG)
-			{
-				OutputFiles::m_logFile << "Error : Wrong type ID is specified below TYPE_OF_CG : " << ibuf << std::endl;
-				exit(1);
-				break;
-			}
-			m_typeOfCG = ibuf;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 12).compare("TRADE_OFF_CG") == 0)
+		if (m_tradeOffParameterForMinNorm < 0.0)
 		{
-			if (!hasAlreadyRead[AnalysisControl::TYPE_OF_CG])
-			{
-				OutputFiles::m_logFile << "Error : You must write TYPE_OF_CG data above TRADE_OFF_CG" << std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::TRADE_OFF_CG;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "TRADE_OFF_CG");
-			switch (m_typeOfCG)
-			{
-			case AnalysisControl::FD_CG:
-				inFile >> m_tradeOffParameterForCrossGradient;
-				break;
-			case AnalysisControl::CD_CG:
-				inFile >> m_tradeOffParameterForCrossGradient;
-				break;
-			case AnalysisControl::MS_CG:
-				inFile >> m_tradeOffParameterForCrossGradient;
-				inFile >> m_smallvalueForCrossGradient;
-				break;
-			default:
-				OutputFiles::m_logFile << "Error : Wrong type of Cross-Gradient operator : " << ibuf << std::endl;
-				exit(1);
-				break;
-			}
-			m_CrossGradientInv = true;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : 	m_tradeOffParameterForMinNorm must >= 0.0 : " << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 17).compare("TYPE_OF_REFERENCE") == 0)
+		else
 		{
-			const int paramID = AnalysisControl::TYPE_OF_REFERENCE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "REFERENCE_MOD");
-			inFile >> m_typeOfReferenceModel;
-
-			if (m_typeOfReferenceModel < 0)
-			{
-				OutputFiles::m_logFile << "Error : 	m_typeOfReferenceModel must be an integer >=0 " << std::endl;
-				exit(1);
-				break;
-			}
-			else
-			{
-				hasAlreadyRead[paramID] = true;
-			}
-		}
-		else if (line.substr(0, 19).compare("WEIGHT_OF_REFERENCE") == 0)
-		{
-			if (!hasAlreadyRead[AnalysisControl::TYPE_OF_REFERENCE])
-			{
-				OutputFiles::m_logFile << "Error : You must write TYPE_OF_CG data above TRADE_OFF_CG" << std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::WEIGHT_OF_REFERENCE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "REFERENCE_MOD");
-			inFile >> m_tradeOffParameterForMinNorm;
-
-			if (m_tradeOffParameterForMinNorm < 0.0)
-			{
-				OutputFiles::m_logFile << "Error : 	m_tradeOffParameterForMinNorm must >= 0.0 : " << std::endl;
-				exit(1);
-				break;
-			}
-			else
-			{
-				m_MinNormInv = true;
-				hasAlreadyRead[paramID] = true;
-			}
-		}
-		else if (line.substr(0, 19).compare("NORM_OF_MINIMUMNORM") == 0)
-		{
-			if (!hasAlreadyRead[AnalysisControl::TYPE_OF_REFERENCE])
-			{
-				OutputFiles::m_logFile << "Error : You must write TYPE_OF_REFERENCE data above NORM_OF_MINIMUMNORM" << std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::NORM_OF_MINIMUMNORM;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "NORM_OF_MINIMUMNORM");
-			inFile >> ibuf;
-			m_degreeOfLpMinimumNorm = ibuf;
-			if (m_degreeOfLpMinimumNorm == 0)
-			{
-				inFile >> dbuf;
-				m_smallvauleOfMinimumSupport = dbuf;
-			}
-			else if (m_degreeOfLpMinimumNorm == 1 || m_degreeOfLpMinimumNorm == 2)
-			{
-				inFile >> dbuf;
-				m_lowerLimitOfDifflog10RhoForLpMinimumNorm = dbuf;
-				inFile >> dbuf;
-				m_upperLimitOfDifflog10RhoForLpMinimumNorm = dbuf;
-			}
 			m_MinNormInv = true;
 			hasAlreadyRead[paramID] = true;
 		}
-		else if (line.substr(0, 12).compare("ROUGH_MATRIX") == 0)
-		{
-			const int paramID = AnalysisControl::ROUGH_MATRIX;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ROUGH_MATRIX");
-			inFile >> ibuf;
-			if (ibuf >= AnalysisControl::EndOfTypeOfRoughningMatrix)
-			{
-				OutputFiles::m_logFile << "Error : Inputted parameter specifing the way of creating roughning matrix is wrong !! : " << ibuf << std::endl;
-				exit(1);
-			}
-			else
-			{
-				m_typeOfRoughningMatrix = ibuf;
-			}
+	}
+	if (seekKeyword("NORM_OF_MINIMUMNORM", 19))
+	{
 
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 10).compare("ELEC_FIELD") == 0)
+		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_REFERENCE])
 		{
-			const int paramID = AnalysisControl::ELEC_FIELD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ELEC_FIELD");
-			inFile >> ibuf;
-			if (ibuf < 0)
-			{
-				m_isTypeOfElectricFieldSetIndivisually = true;
-			}
-			else if (ibuf != AnalysisControl::USE_HORIZONTAL_ELECTRIC_FIELD &&
-					 ibuf != AnalysisControl::USE_TANGENTIAL_ELECTRIC_FIELD)
-			{
-				OutputFiles::m_logFile << "Error : Unknown type of the electric field is specified in ELEC_FIELD : " << ibuf << std::endl;
-				exit(1);
-			}
-			m_typeOfElectricField = ibuf;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : You must write TYPE_OF_REFERENCE data above NORM_OF_MINIMUMNORM" << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 15).compare("DIV_NUM_RHS_FWD") == 0)
+		const int paramID = AnalysisControl::NORM_OF_MINIMUMNORM;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "NORM_OF_MINIMUMNORM");
+		inFile >> ibuf;
+		m_degreeOfLpMinimumNorm = ibuf;
+		if (m_degreeOfLpMinimumNorm == 0)
 		{
-			const int paramID = AnalysisControl::DIV_NUM_RHS_FWD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DIV_NUM_RHS_FWD");
-			inFile >> m_divisionNumberOfMultipleRHSInForward;
-			if (m_divisionNumberOfMultipleRHSInForward < 1)
-			{
-				OutputFiles::m_logFile << "Error : Division number of right-hand sides must be greater than zero !! Specified number is " << m_divisionNumberOfMultipleRHSInForward << "." << std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
+			inFile >> dbuf;
+			m_smallvauleOfMinimumSupport = dbuf;
 		}
-		else if (line.substr(0, 15).compare("DIV_NUM_RHS_INV") == 0)
+		else if (m_degreeOfLpMinimumNorm == 1 || m_degreeOfLpMinimumNorm == 2)
 		{
-			const int paramID = AnalysisControl::DIV_NUM_RHS_INV;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DIV_NUM_RHS_INV");
-			inFile >> m_divisionNumberOfMultipleRHSInInversion;
-			if (m_divisionNumberOfMultipleRHSInInversion < 1)
-			{
-				OutputFiles::m_logFile << "Error : Division number of right-hand sides must be greater than zero !! Specified number is " << m_divisionNumberOfMultipleRHSInInversion << "." << std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
+			inFile >> dbuf;
+			m_lowerLimitOfDifflog10RhoForLpMinimumNorm = dbuf;
+			inFile >> dbuf;
+			m_upperLimitOfDifflog10RhoForLpMinimumNorm = dbuf;
 		}
-		else if (line.substr(0, 18).compare("RESISTIVITY_BOUNDS") == 0)
+		m_MinNormInv = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ROUGH_MATRIX", 12))
+	{
+
+		const int paramID = AnalysisControl::ROUGH_MATRIX;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ROUGH_MATRIX");
+		inFile >> ibuf;
+		if (ibuf >= AnalysisControl::EndOfTypeOfRoughningMatrix)
 		{
-			const int paramID = AnalysisControl::RESISTIVITY_BOUNDS;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RESISTIVITY_BOUNDS");
-			inFile >> ibuf;
-			ptrResistivityBlock->setTypeBoundConstraints(ibuf);
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : Inputted parameter specifing the way of creating roughning matrix is wrong !! : " << ibuf << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 10).compare("OFILE_TYPE") == 0)
+		else
 		{
-			const int paramID = AnalysisControl::OFILE_TYPE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OFILE_TYPE");
-			inFile >> ibuf;
-			if (ibuf == 0)
-			{ // ASCII format
-				m_binaryOutput = false;
-			}
-			else
-			{ // Binary format
-				m_binaryOutput = true;
-			}
-			hasAlreadyRead[paramID] = true;
+			m_typeOfRoughningMatrix = ibuf;
 		}
-		else if (line.substr(0, 12).compare("HOLD_FWD_MEM") == 0)
+
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ELEC_FIELD", 10))
+	{
+
+		const int paramID = AnalysisControl::ELEC_FIELD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ELEC_FIELD");
+		inFile >> ibuf;
+		if (ibuf < 0)
 		{
-			const int paramID = AnalysisControl::HOLD_FWD_MEM;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "HOLD_FWD_MEM");
-			m_holdMemoryForwardSolver = true;
-			hasAlreadyRead[paramID] = true;
+			m_isTypeOfElectricFieldSetIndivisually = true;
 		}
-		else if (line.substr(0, 12).compare("ALPHA_WEIGHT") == 0)
+		else if (ibuf != AnalysisControl::USE_HORIZONTAL_ELECTRIC_FIELD &&
+				 ibuf != AnalysisControl::USE_TANGENTIAL_ELECTRIC_FIELD)
 		{
-			const int paramID = AnalysisControl::ALPHA_WEIGHT;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ALPHA_WEIGHT");
-			for (int iDir = 0; iDir < 3; ++iDir)
-			{
-				double dbuf(0.0);
-				inFile >> dbuf;
-				if (dbuf < 0.0)
-				{
-					OutputFiles::m_logFile << "Error : Weighting factor of alpha must be positive !! : " << dbuf << std::endl;
-					exit(1);
-				}
-				m_alphaWeight[iDir] = dbuf;
-			}
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : Unknown type of the electric field is specified in ELEC_FIELD : " << ibuf << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 25).compare("INV_MAT_POSITIVE_DEFINITE") == 0)
+		m_typeOfElectricField = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("DIV_NUM_RHS_FWD", 15))
+	{
+
+		const int paramID = AnalysisControl::DIV_NUM_RHS_FWD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DIV_NUM_RHS_FWD");
+		inFile >> m_divisionNumberOfMultipleRHSInForward;
+		if (m_divisionNumberOfMultipleRHSInForward < 1)
 		{
-			const int paramID = AnalysisControl::INV_MAT_POSITIVE_DEFINITE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "INV_MAT_POSITIVE_DEFINITE");
-			m_positiveDefiniteNormalEqMatrix = true;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : Division number of right-hand sides must be greater than zero !! Specified number is " << m_divisionNumberOfMultipleRHSInForward << "." << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 18).compare("BOTTOM_RESISTIVITY") == 0)
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("DIV_NUM_RHS_INV", 15))
+	{
+
+		const int paramID = AnalysisControl::DIV_NUM_RHS_INV;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DIV_NUM_RHS_INV");
+		inFile >> m_divisionNumberOfMultipleRHSInInversion;
+		if (m_divisionNumberOfMultipleRHSInInversion < 1)
 		{
-			const int paramID = AnalysisControl::BOTTOM_RESISTIVITY;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOTTOM_RESISTIVITY");
-			ptrResistivityBlock->setFlagIncludeBottomResistivity(true);
+			OutputFiles::m_logFile << "Error : Division number of right-hand sides must be greater than zero !! Specified number is " << m_divisionNumberOfMultipleRHSInInversion << "." << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("RESISTIVITY_BOUNDS", 18))
+	{
+
+		const int paramID = AnalysisControl::RESISTIVITY_BOUNDS;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RESISTIVITY_BOUNDS");
+		inFile >> ibuf;
+		ptrResistivityBlock->setTypeBoundConstraints(ibuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("OFILE_TYPE", 10))
+	{
+
+		const int paramID = AnalysisControl::OFILE_TYPE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OFILE_TYPE");
+		inFile >> ibuf;
+		if (ibuf == 0)
+		{ // ASCII format
+			m_binaryOutput = false;
+		}
+		else if (ibuf == -1)
+		{
+			// Suppress all per-iteration csv/vtk diagnostic output
+			// (result_*_iterX.{csv,vtk}, obs_loc.vtk,
+			// induction_arrow_*_iterX.vtk, etc.) while leaving
+			// resistivity_block_iterX.dat, distortion_iterX.dat,
+			// sensitivity_iterX.dat/sensitivity_normalized_iterX.dat, and
+			// any other .dat/.h5 output untouched, for compatibility.
+			// Kept in ASCII mode (m_binaryOutput = false) rather than
+			// binary -- see the matching comment in femtic_v4_src/
+			// femtic_v5_src for why.
+			// Added by Volker Rath (DIAS) with the help of Claude Sonnet
+			// 5 (Anthropic), 2026-09-14.
+			m_binaryOutput = false;
+			m_suppressCsvVtkOutput = true;
+		}
+		else
+		{ // Binary format
+			m_binaryOutput = true;
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("HOLD_FWD_MEM", 12))
+	{
+
+		const int paramID = AnalysisControl::HOLD_FWD_MEM;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "HOLD_FWD_MEM");
+		m_holdMemoryForwardSolver = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ALPHA_WEIGHT", 12))
+	{
+
+		const int paramID = AnalysisControl::ALPHA_WEIGHT;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ALPHA_WEIGHT");
+		for (int iDir = 0; iDir < 3; ++iDir)
+		{
 			double dbuf(0.0);
 			inFile >> dbuf;
 			if (dbuf < 0.0)
 			{
-				OutputFiles::m_logFile << "Error : Bottom resistivity is set to be negative !! : " << dbuf << std::endl;
+				OutputFiles::m_logFile << "Error : Weighting factor of alpha must be positive !! : " << dbuf << std::endl;
 				exit(1);
 			}
-			ptrResistivityBlock->setBottomResistivity(dbuf);
-			hasAlreadyRead[paramID] = true;
+			m_alphaWeight[iDir] = dbuf;
 		}
-		else if (line.substr(0, 23).compare("BOTTOM_ROUGHNING_FACTOR") == 0)
-		{
-			const int paramID = AnalysisControl::BOTTOM_ROUGHNING_FACTOR;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOTTOM_ROUGHNING_FACTOR");
-			inFile >> dbuf;
-			if (dbuf < 0.0)
-			{
-				OutputFiles::m_logFile << "Error : Roughning factor at bottom is set to be negative !! : " << dbuf << std::endl;
-				exit(1);
-			}
-			ptrResistivityBlock->setRoughningFactorAtBottom(dbuf);
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 10).compare("INV_METHOD") == 0)
-		{
-			const int paramID = AnalysisControl::INV_METHOD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "INV_METHOD");
-			inFile >> m_inversionMethod;
-			if (m_inversionMethod != Inversion::GAUSS_NEWTON_DATA_SPECE &&
-				m_inversionMethod != Inversion::GAUSS_NEWTON_MODEL_SPECE &&
-				m_inversionMethod != Inversion::ABIC_DATA_SPECE &&
-				m_inversionMethod != Inversion::OCCAM_DATA_SPECE &&
-				m_inversionMethod != Inversion::LINEAR_LCURVE_DATA_SPECE &&
-				m_inversionMethod != Inversion::NONLINEAR_LCURVE_DATA_SPECE &&
-				m_inversionMethod != Inversion::DATA_FIT_COOLING_DATA_SPECE)
-			{
-				// Code block
-				OutputFiles::m_logFile << "Error : Type of inversion method is wrong  !! : " << m_inversionMethod << std::endl;
-				exit(1);
-			}
-			if (m_inversionMethod == Inversion::ABIC_DATA_SPECE)
-			{
-				m_ABICinversion = true;
-			}
-			if (m_inversionMethod == Inversion::OCCAM_DATA_SPECE)
-			{
-				m_OCCAMinversion = true;
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 23).compare("RUN_INEXACT_LINE_SEARCH") == 0)
-		{
-			if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
-			{
-				OutputFiles::m_logFile << "Error : You must write INV_METHOD data above RUN_INEXACT_LINE_SEARCH" << std::endl;
-				exit(1);
-			}
-			if (!m_ABICinversion)
-			{
-				OutputFiles::m_logFile << "Error : You must select ABIC inversion while define RUN_INEXACT_LINE_SEARCH" << std::endl;
-				exit(1);
-			}
-			if (hasAlreadyRead[AnalysisControl::ABIC_SEARCH_MODE])
-			{
-				OutputFiles::m_logFile
-					<< "Error : ABIC_SEARCH_MODE conflicts with legacy RUN_INEXACT_LINE_SEARCH."
-					<< std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::RUN_INEXACT_LINE_SEARCH;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RUN_INEXACT_LINE_SEARCH");
-			int enable = 0;
-			int legacyMode = 0;
-			inFile >> enable >> legacyMode;
-			if (enable != 1 || legacyMode != 2)
-			{
-				OutputFiles::m_logFile << "Error : Legacy ABIC mode " << legacyMode
-					<< " is no longer supported. Use ABIC_SEARCH_MODE EXACT or INEXACT."
-					<< std::endl;
-				exit(1);
-			}
-			m_abicSearchMode = ABIC_SEARCH_INEXACT;
-			OutputFiles::m_logFile
-				<< "# Deprecated: Legacy RUN_INEXACT_LINE_SEARCH 1 2 maps to ABIC_SEARCH_MODE INEXACT."
-				<< std::endl;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 16).compare("ABIC_SEARCH_MODE") == 0)
-		{
-			if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
-			{
-				OutputFiles::m_logFile
-					<< "Error : You must write INV_METHOD above ABIC_SEARCH_MODE."
-					<< std::endl;
-				exit(1);
-			}
-			if (!m_ABICinversion)
-			{
-				OutputFiles::m_logFile
-					<< "Error : ABIC_SEARCH_MODE is available only for ABIC inversion."
-					<< std::endl;
-				exit(1);
-			}
-			if (hasAlreadyRead[AnalysisControl::RUN_INEXACT_LINE_SEARCH])
-			{
-				OutputFiles::m_logFile
-					<< "Error : ABIC_SEARCH_MODE conflicts with legacy RUN_INEXACT_LINE_SEARCH."
-					<< std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::ABIC_SEARCH_MODE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ABIC_SEARCH_MODE");
-			std::string mode;
-			inFile >> mode;
-			if (mode == "EXACT")
-			{
-				m_abicSearchMode = ABIC_SEARCH_EXACT;
-				OutputFiles::m_logFile << "# ABIC search mode: exact" << std::endl;
-			}
-			else if (mode == "INEXACT")
-			{
-				m_abicSearchMode = ABIC_SEARCH_INEXACT;
-				OutputFiles::m_logFile << "# ABIC search mode: inexact" << std::endl;
-			}
-			else
-			{
-				OutputFiles::m_logFile
-					<< "Error : ABIC_SEARCH_MODE must be EXACT or INEXACT."
-					<< std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 29).compare("RUN_INEXACT_OCCAM_LINE_SEARCH") == 0)
-		{
-			if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
-			{
-				OutputFiles::m_logFile << "Error : You must write INV_METHOD data above RUN_INEXACT_OCCAM_LINE_SEARCH" << std::endl;
-				exit(1);
-			}
-			if (!m_OCCAMinversion)
-			{
-				OutputFiles::m_logFile << "Error : You must select OCCAM inversion while defining RUN_INEXACT_OCCAM_LINE_SEARCH" << std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::RUN_INEXACT_OCCAM_LINE_SEARCH;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RUN_INEXACT_OCCAM_LINE_SEARCH");
-			inFile >> ibuf;
-			if (ibuf == 1)
-			{
-				m_inexactMinimizationOfOCCAM = true;
-				OutputFiles::m_logFile << "# Run OCCAM with inexact Phase-I RMS minimization" << std::endl;
-			}
-			else if (ibuf != 0)
-			{
-				OutputFiles::m_logFile << "Error : RUN_INEXACT_OCCAM_LINE_SEARCH must be 0 or 1 : " << ibuf << std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 13).compare("ALPHA_COOLING") == 0)
-		{
-			if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
-			{
-				OutputFiles::m_logFile << "Error : You must write INV_METHOD data above ALPHA_COOLING" << std::endl;
-				exit(1);
-			}
-			if (m_inversionMethod != Inversion::DATA_FIT_COOLING_DATA_SPECE)
-			{
-				OutputFiles::m_logFile << "Error : Data-fit-bracketed cooling requires INV_METHOD 6." << std::endl;
-				exit(1);
-			}
-			const int paramID = AnalysisControl::ALPHA_COOLING;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ALPHA_COOLING");
-			if (!(inFile >> m_dataFitCoolingInitialRmsDecreaseThreshold
-				>> m_dataFitCoolingTriggerThreshold
-				>> m_dataFitCoolingFactor
-				>> m_dataFitCoolingMinimumAlpha))
-			{
-				OutputFiles::m_logFile
-					<< "Error : ALPHA_COOLING requires four values: initial RMS decrease threshold, "
-					<< "cooling trigger threshold, cooling factor, and minimum alpha." << std::endl;
-				exit(1);
-			}
-			if (m_dataFitCoolingInitialRmsDecreaseThreshold <= 0.0 ||
-				m_dataFitCoolingInitialRmsDecreaseThreshold >= 1.0)
-			{
-				OutputFiles::m_logFile << "Error : ALPHA_COOLING initial RMS decrease threshold must be between 0 and 1." << std::endl;
-				exit(1);
-			}
-			if (m_dataFitCoolingTriggerThreshold <= 0.0 ||
-				m_dataFitCoolingTriggerThreshold >= 1.0)
-			{
-				OutputFiles::m_logFile << "Error : ALPHA_COOLING cooling trigger threshold must be between 0 and 1." << std::endl;
-				exit(1);
-			}
-			if (m_dataFitCoolingFactor <= 0.0 || m_dataFitCoolingFactor >= 1.0)
-			{
-				OutputFiles::m_logFile << "Error : ALPHA_COOLING factor must be between 0 and 1." << std::endl;
-				exit(1);
-			}
-			if (m_dataFitCoolingMinimumAlpha <= 0.0)
-			{
-				OutputFiles::m_logFile << "Error : ALPHA_COOLING minimum alpha must be positive." << std::endl;
-				exit(1);
-			}
-			hasAlreadyRead[paramID] = true;
-		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("INV_MAT_POSITIVE_DEFINITE", 25))
+	{
 
-		else if (line.substr(0, 14).compare("APPRAISAL_MODE") == 0)
+		const int paramID = AnalysisControl::INV_MAT_POSITIVE_DEFINITE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "INV_MAT_POSITIVE_DEFINITE");
+		m_positiveDefiniteNormalEqMatrix = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("BOTTOM_RESISTIVITY", 18))
+	{
+
+		const int paramID = AnalysisControl::BOTTOM_RESISTIVITY;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOTTOM_RESISTIVITY");
+		ptrResistivityBlock->setFlagIncludeBottomResistivity(true);
+		double dbuf(0.0);
+		inFile >> dbuf;
+		if (dbuf < 0.0)
 		{
-			const int paramID = AnalysisControl::APPRAISAL_MODE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "APPRAISAL_MODE");
-			inFile >> ibuf;
-			if (!isKnownAppraisalMode(ibuf))
-			{
-				OutputFiles::m_logFile
-					<< "Error : APPRAISAL_MODE must be 0, 1, or 2 : " << ibuf
-					<< ". Use 0 for model-resolution + covariance diagonals, "
-					<< "1 for model-resolution diagonal only, and "
-					<< "2 for covariance diagonal only. Omit APPRAISAL_MODE to disable appraisal."
-					<< std::endl;
-				exit(1);
-			}
-			if (!isSupportedAppraisalMode(ibuf))
-			{
-				OutputFiles::m_logFile
-					<< "Error : APPRAISAL_MODE " << ibuf << " ("
-					<< appraisalModeLabel(ibuf)
-					<< ") is currently unsupported. The maintained appraisal migration "
-					<< "scope is limited to model-resolution diagonal (2) and "
-					<< "covariance diagonal (3)." << std::endl;
-				exit(1);
-			}
-			m_appraisalMode = ibuf;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : Bottom resistivity is set to be negative !! : " << dbuf << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 24).compare("APPRAISAL_RANDOM_VECTORS") == 0)
+		ptrResistivityBlock->setBottomResistivity(dbuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("BOTTOM_ROUGHNING_FACTOR", 23))
+	{
+
+		const int paramID = AnalysisControl::BOTTOM_ROUGHNING_FACTOR;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOTTOM_ROUGHNING_FACTOR");
+		inFile >> dbuf;
+		if (dbuf < 0.0)
 		{
-			const int paramID = AnalysisControl::APPRAISAL_RANDOM_VECTORS;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "APPRAISAL_RANDOM_VECTORS");
-			inFile >> ibuf;
-			if (ibuf <= 0)
-			{
-				OutputFiles::m_logFile << "Error : APPRAISAL_RANDOM_VECTORS must be positive : " << ibuf << std::endl;
-				exit(1);
-			}
-			m_numRandomVectorsForAppraisal = ibuf;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : Roughning factor at bottom is set to be negative !! : " << dbuf << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 21).compare("APPRAISAL_CHECKPOINTS") == 0)
+		ptrResistivityBlock->setRoughningFactorAtBottom(dbuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("INV_METHOD", 10))
+	{
+
+		const int paramID = AnalysisControl::INV_METHOD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "INV_METHOD");
+		inFile >> m_inversionMethod;
+		if (m_inversionMethod != Inversion::GAUSS_NEWTON_DATA_SPECE &&
+			m_inversionMethod != Inversion::GAUSS_NEWTON_MODEL_SPECE &&
+			m_inversionMethod != Inversion::ABIC_DATA_SPECE &&
+			m_inversionMethod != Inversion::OCCAM_DATA_SPECE &&
+			m_inversionMethod != Inversion::LINEAR_LCURVE_DATA_SPECE &&
+			m_inversionMethod != Inversion::NONLINEAR_LCURVE_DATA_SPECE &&
+			m_inversionMethod != Inversion::DATA_FIT_COOLING_DATA_SPECE)
 		{
-			rejectDeprecatedAppraisalKeyword("APPRAISAL_CHECKPOINTS");
+			// Code block
+			OutputFiles::m_logFile << "Error : Type of inversion method is wrong  !! : " << m_inversionMethod << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 31).compare("APPRAISAL_INPUT_SENSITIVITY_DIR") == 0)
+		if (m_inversionMethod == Inversion::ABIC_DATA_SPECE)
 		{
-			rejectDeprecatedAppraisalKeyword("APPRAISAL_INPUT_SENSITIVITY_DIR");
+			m_ABICinversion = true;
 		}
-		else if (line.substr(0, 20).compare("APPRAISAL_OUTPUT_DIR") == 0)
+		if (m_inversionMethod == Inversion::OCCAM_DATA_SPECE)
 		{
-			rejectDeprecatedAppraisalKeyword("APPRAISAL_OUTPUT_DIR");
+			m_OCCAMinversion = true;
 		}
-		else if (line.substr(0, 27).compare("APPRAISAL_WRITE_LEGACY_DSDK") == 0)
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("RUN_INEXACT_LINE_SEARCH", 23))
+	{
+
+		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
 		{
-			rejectDeprecatedAppraisalKeyword("APPRAISAL_WRITE_LEGACY_DSDK");
+			OutputFiles::m_logFile << "Error : You must write INV_METHOD data above RUN_INEXACT_LINE_SEARCH" << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 16).compare("BOUNDS_DIST_THLD") == 0)
+		if (!m_ABICinversion)
 		{
-			const int paramID = AnalysisControl::BOUNDS_DIST_THLD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOUNDS_DIST_THLD");
-			inFile >> dbuf;
-			if (dbuf <= 0.0)
-			{
-				OutputFiles::m_logFile << "Error : Minimum distance to resistivity bounds must be positive !!" << std::endl;
-				exit(1);
-			}
-			ptrResistivityBlock->setMinDistanceToBounds(dbuf);
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : You must select ABIC inversion while define RUN_INEXACT_LINE_SEARCH" << std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 3).compare("IDW") == 0)
+		if (hasAlreadyRead[AnalysisControl::ABIC_SEARCH_MODE])
 		{
-			const int paramID = AnalysisControl::IDW;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "IDW");
-			inFile >> dbuf;
-			if (dbuf < 0.0)
-			{
-				OutputFiles::m_logFile << "Error : Factor of inverse distance weighting must not be negative !!" << std::endl;
-				exit(1);
-			}
-			ptrResistivityBlock->setInverseDistanceWeightingFactor(dbuf);
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile
+				<< "Error : ABIC_SEARCH_MODE conflicts with legacy RUN_INEXACT_LINE_SEARCH."
+				<< std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 11).compare("SMALL_VALUE") == 0)
+		const int paramID = AnalysisControl::RUN_INEXACT_LINE_SEARCH;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RUN_INEXACT_LINE_SEARCH");
+		int enable = 0;
+		int legacyMode = 0;
+		inFile >> enable >> legacyMode;
+		if (enable != 1 || legacyMode != 2)
 		{
-			const int paramID = AnalysisControl::SMALL_VALUE;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "LEVENBERG_MARQUARDT");
-			inFile >> dbuf;
-			if (dbuf < 0.0)
-			{
-				OutputFiles::m_logFile << "Error : Small value added to the diagonals of roughning matrix must not be negative !!" << std::endl;
-				exit(1);
-			}
-			ptrResistivityBlock->setFlagAddSmallValueToDiagonals(true);
-			ptrResistivityBlock->setSmallValueAddedToDiagonals(dbuf);
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile << "Error : Legacy ABIC mode " << legacyMode
+				<< " is no longer supported. Use ABIC_SEARCH_MODE EXACT or INEXACT."
+				<< std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 19).compare("LEVENBERG_MARQUARDT") == 0)
+		m_abicSearchMode = ABIC_SEARCH_INEXACT;
+		OutputFiles::m_logFile
+			<< "# Deprecated: Legacy RUN_INEXACT_LINE_SEARCH 1 2 maps to ABIC_SEARCH_MODE INEXACT."
+			<< std::endl;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ABIC_SEARCH_MODE", 16))
+	{
+
+		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
 		{
-			const int paramID = AnalysisControl::Levenberg_Marquardt;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "SMALL_VALUE");
-			inFile >> dbuf;
-			if (dbuf < 0.0)
-			{
-				OutputFiles::m_logFile << "Error : Damping of Levenberg_Marquardt added to the diagonals of Hessian matrix must not be negative !!" << std::endl;
-				exit(1);
-			}
-			m_Levenberg_Marquardt = true;
-			m_dampingof_LM = dbuf;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile
+				<< "Error : You must write INV_METHOD above ABIC_SEARCH_MODE."
+				<< std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 12).compare("MOVE_OBS_LOC") == 0)
+		if (!m_ABICinversion)
 		{
-			const int paramID = AnalysisControl::MOVE_OBS_LOC;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "MOVE_OBS_LOC");
-			m_isObsLocMovedToCenter = true;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile
+				<< "Error : ABIC_SEARCH_MODE is available only for ABIC inversion."
+				<< std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 13).compare("OWNER_ELEMENT") == 0)
+		if (hasAlreadyRead[AnalysisControl::RUN_INEXACT_LINE_SEARCH])
 		{
-			const int paramID = AnalysisControl::OWNER_ELEMENT;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OWNER_ELEMENT");
-			inFile >> ibuf;
-			if (ibuf < 0)
-			{
-				m_isTypeOfOwnerElementSetIndivisually = true;
-			}
-			else if (ibuf != AnalysisControl::USE_LOWER_ELEMENT && ibuf != AnalysisControl::USE_UPPER_ELEMENT)
-			{
-				OutputFiles::m_logFile << "Error : Unknown type of owner element is specified in OWNER_ELEMENT : " << ibuf << std::endl;
-				exit(1);
-			}
-			m_typeOfOwnerElement = ibuf;
-			hasAlreadyRead[paramID] = true;
+			OutputFiles::m_logFile
+				<< "Error : ABIC_SEARCH_MODE conflicts with legacy RUN_INEXACT_LINE_SEARCH."
+				<< std::endl;
+			exit(1);
 		}
-		else if (line.substr(0, 14).compare("APP_PHS_OPTION") == 0)
+		const int paramID = AnalysisControl::ABIC_SEARCH_MODE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ABIC_SEARCH_MODE");
+		std::string mode;
+		inFile >> mode;
+		if (mode == "EXACT")
 		{
-			const int paramID = AnalysisControl::APP_PHS_OPTION;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "APP_PHS_OPTION");
-			inFile >> ibuf;
-			if (ibuf != NO_SPECIAL_TREATMENT_APP_AND_PHASE && ibuf != USE_Z_IF_SIGN_OF_RE_Z_DIFFER)
-			{
-				OutputFiles::m_logFile << "Error : Unknown option is specified in APP_PHS_OPTION : " << ibuf << std::endl;
-				exit(1);
-			}
-			m_apparentResistivityAndPhaseTreatmentOption = ibuf;
-			hasAlreadyRead[paramID] = true;
+			m_abicSearchMode = ABIC_SEARCH_EXACT;
+			OutputFiles::m_logFile << "# ABIC search mode: exact" << std::endl;
 		}
-		else if (line.substr(0, 19).compare("OUTPUT_ROUGH_MATRIX") == 0)
+		else if (mode == "INEXACT")
 		{
-			const int paramID = AnalysisControl::OUTPUT_ROUGH_MATRIX;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_ROUGH_MATRIX");
-			m_isRougheningMatrixOutputted = true;
-			hasAlreadyRead[paramID] = true;
-		}
-		else if (line.substr(0, 17).compare("DATA_SPACE_METHOD") == 0)
-		{
-			const int paramID = AnalysisControl::DATA_SPACE_METHOD;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DATA_SPACE_METHOD");
-			inFile >> ibuf;
-			m_typeOfDataSpaceAlgorithm = ibuf;
-			hasAlreadyRead[paramID] = true;
-#ifdef _ANISOTOROPY
-		}
-		else if (line.substr(0, 10).compare("ANISOTROPY") == 0)
-		{
-			const int paramID = AnalysisControl::ANISOTROPY;
-			ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ANISOTROPY");
-			inFile >> ibuf;
-			m_typeOfAnisotropy = ibuf;
-			hasAlreadyRead[paramID] = true;
-#endif
-		}
-		else if (line.substr(0, 11).compare("DIFF_FILTER") == 0)
-		{
-			m_useDifferenceFilter = true;
-			inFile >> ibuf;
-			m_degreeOfLpOptimization = ibuf;
-			if (m_degreeOfLpOptimization == 0)
-			{
-				inFile >> dbuf;
-				m_smallvauleOfMinimumGradientSupport = dbuf;
-			}
-			else if (m_degreeOfLpOptimization == 1 || m_degreeOfLpOptimization == 2)
-			{
-				inFile >> dbuf;
-				m_lowerLimitOfDifflog10RhoForLpOptimization = dbuf;
-				inFile >> dbuf;
-				m_upperLimitOfDifflog10RhoForLpOptimization = dbuf;
-			}
-			inFile >> ibuf;
-			m_maxIterationIRWLSForLpOptimization = ibuf;
-			inFile >> dbuf;
-			m_thresholdIRWLSForLpOptimization = dbuf;
-		}else if (line.substr(0,19).compare("SENSE_MAT_DIRECTORY") == 0) {
-			inFile >> m_directoryOfOutOfCoreFilesForSensitivityMatrix;
-		}
-		else if (ControlKeywords::isEndKeywordLine(line))
-		{
-			break;
+			m_abicSearchMode = ABIC_SEARCH_INEXACT;
+			OutputFiles::m_logFile << "# ABIC search mode: inexact" << std::endl;
 		}
 		else
 		{
-			OutputFiles::m_logFile << "Error : Improper data !! " << line << std::endl;
+			OutputFiles::m_logFile
+				<< "Error : ABIC_SEARCH_MODE must be EXACT or INEXACT."
+				<< std::endl;
 			exit(1);
 		}
+		hasAlreadyRead[paramID] = true;
 	}
-	inFile.close();
+	if (seekKeyword("RUN_INEXACT_OCCAM_LINE_SEARCH", 29))
+	{
+
+		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
+		{
+			OutputFiles::m_logFile << "Error : You must write INV_METHOD data above RUN_INEXACT_OCCAM_LINE_SEARCH" << std::endl;
+			exit(1);
+		}
+		if (!m_OCCAMinversion)
+		{
+			OutputFiles::m_logFile << "Error : You must select OCCAM inversion while defining RUN_INEXACT_OCCAM_LINE_SEARCH" << std::endl;
+			exit(1);
+		}
+		const int paramID = AnalysisControl::RUN_INEXACT_OCCAM_LINE_SEARCH;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "RUN_INEXACT_OCCAM_LINE_SEARCH");
+		inFile >> ibuf;
+		if (ibuf == 1)
+		{
+			m_inexactMinimizationOfOCCAM = true;
+			OutputFiles::m_logFile << "# Run OCCAM with inexact Phase-I RMS minimization" << std::endl;
+		}
+		else if (ibuf != 0)
+		{
+			OutputFiles::m_logFile << "Error : RUN_INEXACT_OCCAM_LINE_SEARCH must be 0 or 1 : " << ibuf << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ALPHA_COOLING", 13))
+	{
+
+		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
+		{
+			OutputFiles::m_logFile << "Error : You must write INV_METHOD data above ALPHA_COOLING" << std::endl;
+			exit(1);
+		}
+		if (m_inversionMethod != Inversion::DATA_FIT_COOLING_DATA_SPECE)
+		{
+			OutputFiles::m_logFile << "Error : Data-fit-bracketed cooling requires INV_METHOD 6." << std::endl;
+			exit(1);
+		}
+		const int paramID = AnalysisControl::ALPHA_COOLING;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ALPHA_COOLING");
+		if (!(inFile >> m_dataFitCoolingInitialRmsDecreaseThreshold
+			>> m_dataFitCoolingTriggerThreshold
+			>> m_dataFitCoolingFactor
+			>> m_dataFitCoolingMinimumAlpha))
+		{
+			OutputFiles::m_logFile
+				<< "Error : ALPHA_COOLING requires four values: initial RMS decrease threshold, "
+				<< "cooling trigger threshold, cooling factor, and minimum alpha." << std::endl;
+			exit(1);
+		}
+		if (m_dataFitCoolingInitialRmsDecreaseThreshold <= 0.0 ||
+			m_dataFitCoolingInitialRmsDecreaseThreshold >= 1.0)
+		{
+			OutputFiles::m_logFile << "Error : ALPHA_COOLING initial RMS decrease threshold must be between 0 and 1." << std::endl;
+			exit(1);
+		}
+		if (m_dataFitCoolingTriggerThreshold <= 0.0 ||
+			m_dataFitCoolingTriggerThreshold >= 1.0)
+		{
+			OutputFiles::m_logFile << "Error : ALPHA_COOLING cooling trigger threshold must be between 0 and 1." << std::endl;
+			exit(1);
+		}
+		if (m_dataFitCoolingFactor <= 0.0 || m_dataFitCoolingFactor >= 1.0)
+		{
+			OutputFiles::m_logFile << "Error : ALPHA_COOLING factor must be between 0 and 1." << std::endl;
+			exit(1);
+		}
+		if (m_dataFitCoolingMinimumAlpha <= 0.0)
+		{
+			OutputFiles::m_logFile << "Error : ALPHA_COOLING minimum alpha must be positive." << std::endl;
+			exit(1);
+		}
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("APPRAISAL_MODE", 14))
+	{
+
+		const int paramID = AnalysisControl::APPRAISAL_MODE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "APPRAISAL_MODE");
+		inFile >> ibuf;
+		if (!isKnownAppraisalMode(ibuf))
+		{
+			OutputFiles::m_logFile
+				<< "Error : APPRAISAL_MODE must be 0, 1, or 2 : " << ibuf
+				<< ". Use 0 for model-resolution + covariance diagonals, "
+				<< "1 for model-resolution diagonal only, and "
+				<< "2 for covariance diagonal only. Omit APPRAISAL_MODE to disable appraisal."
+				<< std::endl;
+			exit(1);
+		}
+		if (!isSupportedAppraisalMode(ibuf))
+		{
+			OutputFiles::m_logFile
+				<< "Error : APPRAISAL_MODE " << ibuf << " ("
+				<< appraisalModeLabel(ibuf)
+				<< ") is currently unsupported. The maintained appraisal migration "
+				<< "scope is limited to model-resolution diagonal (2) and "
+				<< "covariance diagonal (3)." << std::endl;
+			exit(1);
+		}
+		m_appraisalMode = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("APPRAISAL_RANDOM_VECTORS", 24))
+	{
+
+		const int paramID = AnalysisControl::APPRAISAL_RANDOM_VECTORS;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "APPRAISAL_RANDOM_VECTORS");
+		inFile >> ibuf;
+		if (ibuf <= 0)
+		{
+			OutputFiles::m_logFile << "Error : APPRAISAL_RANDOM_VECTORS must be positive : " << ibuf << std::endl;
+			exit(1);
+		}
+		m_numRandomVectorsForAppraisal = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("APPRAISAL_CHECKPOINTS", 21))
+	{
+
+		rejectDeprecatedAppraisalKeyword("APPRAISAL_CHECKPOINTS");
+	}
+	if (seekKeyword("APPRAISAL_INPUT_SENSITIVITY_DIR", 31))
+	{
+
+		rejectDeprecatedAppraisalKeyword("APPRAISAL_INPUT_SENSITIVITY_DIR");
+	}
+	if (seekKeyword("APPRAISAL_OUTPUT_DIR", 20))
+	{
+
+		rejectDeprecatedAppraisalKeyword("APPRAISAL_OUTPUT_DIR");
+	}
+	if (seekKeyword("APPRAISAL_WRITE_LEGACY_DSDK", 27))
+	{
+
+		rejectDeprecatedAppraisalKeyword("APPRAISAL_WRITE_LEGACY_DSDK");
+	}
+	if (seekKeyword("BOUNDS_DIST_THLD", 16))
+	{
+
+		const int paramID = AnalysisControl::BOUNDS_DIST_THLD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "BOUNDS_DIST_THLD");
+		inFile >> dbuf;
+		if (dbuf <= 0.0)
+		{
+			OutputFiles::m_logFile << "Error : Minimum distance to resistivity bounds must be positive !!" << std::endl;
+			exit(1);
+		}
+		ptrResistivityBlock->setMinDistanceToBounds(dbuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("IDW", 3))
+	{
+
+		const int paramID = AnalysisControl::IDW;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "IDW");
+		inFile >> dbuf;
+		if (dbuf < 0.0)
+		{
+			OutputFiles::m_logFile << "Error : Factor of inverse distance weighting must not be negative !!" << std::endl;
+			exit(1);
+		}
+		ptrResistivityBlock->setInverseDistanceWeightingFactor(dbuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("SMALL_VALUE", 11))
+	{
+
+		const int paramID = AnalysisControl::SMALL_VALUE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "LEVENBERG_MARQUARDT");
+		inFile >> dbuf;
+		if (dbuf < 0.0)
+		{
+			OutputFiles::m_logFile << "Error : Small value added to the diagonals of roughning matrix must not be negative !!" << std::endl;
+			exit(1);
+		}
+		ptrResistivityBlock->setFlagAddSmallValueToDiagonals(true);
+		ptrResistivityBlock->setSmallValueAddedToDiagonals(dbuf);
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("LEVENBERG_MARQUARDT", 19))
+	{
+
+		const int paramID = AnalysisControl::Levenberg_Marquardt;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "SMALL_VALUE");
+		inFile >> dbuf;
+		if (dbuf < 0.0)
+		{
+			OutputFiles::m_logFile << "Error : Damping of Levenberg_Marquardt added to the diagonals of Hessian matrix must not be negative !!" << std::endl;
+			exit(1);
+		}
+		m_Levenberg_Marquardt = true;
+		m_dampingof_LM = dbuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("MOVE_OBS_LOC", 12))
+	{
+
+		const int paramID = AnalysisControl::MOVE_OBS_LOC;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "MOVE_OBS_LOC");
+		m_isObsLocMovedToCenter = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("OWNER_ELEMENT", 13))
+	{
+
+		const int paramID = AnalysisControl::OWNER_ELEMENT;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OWNER_ELEMENT");
+		inFile >> ibuf;
+		if (ibuf < 0)
+		{
+			m_isTypeOfOwnerElementSetIndivisually = true;
+		}
+		else if (ibuf != AnalysisControl::USE_LOWER_ELEMENT && ibuf != AnalysisControl::USE_UPPER_ELEMENT)
+		{
+			OutputFiles::m_logFile << "Error : Unknown type of owner element is specified in OWNER_ELEMENT : " << ibuf << std::endl;
+			exit(1);
+		}
+		m_typeOfOwnerElement = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("APP_PHS_OPTION", 14))
+	{
+
+		const int paramID = AnalysisControl::APP_PHS_OPTION;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "APP_PHS_OPTION");
+		inFile >> ibuf;
+		if (ibuf != NO_SPECIAL_TREATMENT_APP_AND_PHASE && ibuf != USE_Z_IF_SIGN_OF_RE_Z_DIFFER)
+		{
+			OutputFiles::m_logFile << "Error : Unknown option is specified in APP_PHS_OPTION : " << ibuf << std::endl;
+			exit(1);
+		}
+		m_apparentResistivityAndPhaseTreatmentOption = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("OUTPUT_ROUGH_MATRIX", 19))
+	{
+
+		const int paramID = AnalysisControl::OUTPUT_ROUGH_MATRIX;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "OUTPUT_ROUGH_MATRIX");
+		m_isRougheningMatrixOutputted = true;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("DATA_SPACE_METHOD", 17))
+	{
+
+		const int paramID = AnalysisControl::DATA_SPACE_METHOD;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "DATA_SPACE_METHOD");
+		inFile >> ibuf;
+		m_typeOfDataSpaceAlgorithm = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+#ifdef _ANISOTOROPY
+	if (seekKeyword("ANISOTROPY", 10))
+	{
+
+		const int paramID = AnalysisControl::ANISOTROPY;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ANISOTROPY");
+		inFile >> ibuf;
+		m_typeOfAnisotropy = ibuf;
+		hasAlreadyRead[paramID] = true;
+	}
+#endif
+	if (seekKeyword("DIFF_FILTER", 11))
+	{
+
+		m_useDifferenceFilter = true;
+		inFile >> ibuf;
+		m_degreeOfLpOptimization = ibuf;
+		if (m_degreeOfLpOptimization == 0)
+		{
+			inFile >> dbuf;
+			m_smallvauleOfMinimumGradientSupport = dbuf;
+		}
+		else if (m_degreeOfLpOptimization == 1 || m_degreeOfLpOptimization == 2)
+		{
+			inFile >> dbuf;
+			m_lowerLimitOfDifflog10RhoForLpOptimization = dbuf;
+			inFile >> dbuf;
+			m_upperLimitOfDifflog10RhoForLpOptimization = dbuf;
+		}
+		inFile >> ibuf;
+		m_maxIterationIRWLSForLpOptimization = ibuf;
+		inFile >> dbuf;
+		m_thresholdIRWLSForLpOptimization = dbuf;
+	}
+	if (seekKeyword("SENSE_MAT_DIRECTORY", 19))
+	{
+
+		inFile >> m_directoryOfOutOfCoreFilesForSensitivityMatrix;
+	}
 
 	if (!hasAlreadyRead[AnalysisControl::DISTORTION])
 	{
@@ -3128,7 +3451,6 @@ void AnalysisControl::inputControlData()
 	default:
 		OutputFiles::m_logFile << "Error : Wrong value m_modeOfPARDISO !! m_modeOfPARDISO = " << m_modeOfPARDISO << std::endl;
 		exit(1);
-		break;
 	}
 	OutputFiles::m_logFile << "# Division number of right-hand sides at solve phase in forward calculation : " << m_divisionNumberOfMultipleRHSInForward << std::endl;
 	OutputFiles::m_logFile << "# Division number of right-hand sides at solve phase in inversion : " << m_divisionNumberOfMultipleRHSInInversion << std::endl;
@@ -3186,7 +3508,6 @@ void AnalysisControl::inputControlData()
 	default:
 		OutputFiles::m_logFile << "Error : Wrong value m_numberingMethod !! m_numberingMethod = " << m_modeOfPARDISO << std::endl;
 		exit(1);
-		break;
 	}
 
 	if (m_typeOfMesh == MeshData::HEXA)
@@ -3214,7 +3535,6 @@ void AnalysisControl::inputControlData()
 		default:
 			OutputFiles::m_logFile << "Error : Unknown type of the electric field : " << m_typeOfElectricField << std::endl;
 			exit(1);
-			break;
 		}
 	}
 
@@ -3235,7 +3555,6 @@ void AnalysisControl::inputControlData()
 		default:
 			OutputFiles::m_logFile << "Error : Unknown type of owner element : " << m_typeOfOwnerElement << std::endl;
 			exit(1);
-			break;
 		}
 	}
 
@@ -3249,7 +3568,6 @@ void AnalysisControl::inputControlData()
 	default:
 		OutputFiles::m_logFile << "Error : Unknown type of owner element : " << m_typeOfOwnerElement << std::endl;
 		exit(1);
-		break;
 	}
 
 	if (m_typeOfMesh == MeshData::HEXA)
@@ -3367,7 +3685,6 @@ void AnalysisControl::inputControlData()
 	default:
 		OutputFiles::m_logFile << "Error : Wrong type of anisotropy : " << getTypeOfAnisotropy() << std::endl;
 		exit(1);
-		break;
 	}
 #endif
 
@@ -3434,7 +3751,6 @@ void AnalysisControl::inputControlData()
 		default:
 			OutputFiles::m_logFile << "Error : Type of data space inversion algorithm is wrong  !! : " << getTypeOfDataSpaceAlgorithm() << std::endl;
 			exit(1);
-			break;
 		}
 		break;
 	case Inversion::ABIC_DATA_SPECE:
@@ -3455,7 +3771,6 @@ void AnalysisControl::inputControlData()
 	default:
 		OutputFiles::m_logFile << "Error : Type of inversion method is wrong  !! : " << getInversionMethod() << std::endl;
 		exit(1);
-		break;
 	}
 
 	if (estimateDistortionMatrix())

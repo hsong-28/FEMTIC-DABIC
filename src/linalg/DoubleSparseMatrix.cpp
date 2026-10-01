@@ -422,6 +422,13 @@ int DoubleSparseMatrix::getNumRows() const{
 	return m_numRows;
 }
 
+#ifdef _HDF5_JAC
+// Get total number of non-zero entries (CRS format) (ported from femtic_v4_src, 2026-08-21)
+int DoubleSparseMatrix::getNumNonZeros() const{
+	return m_numNonZeros;
+}
+#endif // _HDF5_JAC
+
 // Get total number of columns
 int DoubleSparseMatrix::getNumColumns() const{
 	return m_numColumns;

@@ -22,11 +22,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
+// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
+// Further modified (HDF5 output support ported from femtic_v4_src) by Volker
+// Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-21.
+// Further modified (rough.h5 write removed from calcRougheningMatrix(); the
+// matrix now goes into exchange.h5 together with the Jacobian, via the new
+// getRougheningMatrix() accessor) by Volker Rath (DIAS) with the help of
+// Claude Sonnet 5.5 (Anthropic), 2026-10-01.
 #include "ResistivityBlock.h"
 #include "MeshDataBrickElement.h"
 #include "MeshDataNonConformingHexaElement.h"
 #include "OutputFiles.h"
 #include "ObservedData.h"
+#include "InputFileMap.h"
 #ifdef _ANISOTOROPY
 #include "Util.h"
 #endif
@@ -273,17 +281,23 @@ void ResistivityBlock::inputResisitivityBlock()
 	const int iterInit = (AnalysisControl::getInstance())->getIterationNumInit();
 	std::ostringstream inputFile;
 	inputFile << "resistivity_block_iter" << iterInit << ".dat";
-	std::ifstream inFile(inputFile.str().c_str(), std::ios::in);
+#ifdef _INPUT_FILE_MAP
+	const std::string resistivityBlockFileName = InputFileMap::resolve("initial", inputFile.str());
+#else
+	const std::string resistivityBlockFileName = InputFileMap::findOnDisk(inputFile.str());
+#endif
+	std::ifstream inFile(resistivityBlockFileName.c_str(), std::ios::in);
 
 	if (inFile.fail())
 	{
-		OutputFiles::m_logFile << "File open error : " << inputFile.str().c_str() << " !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << resistivityBlockFileName << " !!" << std::endl;
 		exit(1);
 	}
 
 	std::ostringstream inputRef;
 	inputRef << "referencemodel" << ".dat";
-	std::ifstream inFileRef(inputRef.str().c_str(), std::ios::in);
+	const std::string referenceModelFileName = InputFileMap::findOnDisk(inputRef.str());
+	std::ifstream inFileRef(referenceModelFileName.c_str(), std::ios::in);
 
 	int nElem(0);
 	inFile >> nElem;
@@ -715,12 +729,17 @@ void ResistivityBlock::inputReferenceModel()
 {
 
 	std::ostringstream inputFile;
-	inputFile << "Referencemodel.dat";
-	std::ifstream inFile(inputFile.str().c_str(), std::ios::in);
+	inputFile << "referencemodel.dat";
+#ifdef _INPUT_FILE_MAP
+	const std::string referenceModelFileName = InputFileMap::resolve("referencemodel", inputFile.str());
+#else
+	const std::string referenceModelFileName = InputFileMap::findOnDisk(inputFile.str());
+#endif
+	std::ifstream inFile(referenceModelFileName.c_str(), std::ios::in);
 
 	if (inFile.fail())
 	{
-		OutputFiles::m_logFile << "File open error : " << inputFile.str().c_str() << " !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << referenceModelFileName << " !!" << std::endl;
 		exit(1);
 	}
 	int nElem(0);
@@ -911,6 +930,37 @@ int ResistivityBlock::getNumResistivityBlockTotal() const
 {
 	return m_numResistivityBlockTotal;
 }
+
+#ifdef _HDF5_OUT
+// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+double ResistivityBlock::getResistivityValuesMinFromBlockID(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return m_resistivityValuesMin[iblk];
+}
+
+double ResistivityBlock::getResistivityValuesMaxFromBlockID(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return m_resistivityValuesMax[iblk];
+}
+
+double ResistivityBlock::getWeightingConstantFromBlockID(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return m_weightingConstants[iblk];
+}
+
+int ResistivityBlock::getTypeOfResistivityBlockHDF5(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return getTypeOfResistivityBlock(m_fixResistivityValues[iblk], m_isolated[iblk]);
+}
+
+#endif // _HDF5_OUT
+
+#ifdef _HDF5_JAC
+// Read-only access to the roughening matrix (CRS format), for exchange.h5.
+const RougheningSquareMatrix& ResistivityBlock::getRougheningMatrix() const {
+	return m_rougheningMatrix;
+}
+#endif // _HDF5_JAC
 
 // Get number of resistivity blocks whose resistivity values are fixed
 int ResistivityBlock::getNumResistivityBlockNotFixed() const
@@ -2010,6 +2060,68 @@ void ResistivityBlock::outputResisitivityBlock(const int iterNum) const
 	}
 
 	fclose(fp);
+}
+
+// Output the two per-block sensitivity values (raw and volume-normalised)
+// to sensitivity_iterN.dat and sensitivity_normalized_iterN.dat, in the
+// same file structure as outputResisitivityBlock() above (element/block
+// counts, element->block map, one line per block) but as two standalone
+// files -- resistivity_block_iterN.dat itself is unaffected. Values are
+// computed exactly as in OutputHDF5.cpp's writeModelGroup()
+// (results_iterN.h5's /model/sensitivity/raw and .../volume_normalised),
+// using the same 1.0e-20 sentinel for fixed blocks; unlike the resistivity
+// value slot the min/max/weight columns don't apply here, so they are
+// written as 0.0.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-14.
+void ResistivityBlock::outputSensitivityBlock( const int iterNum, const double* sensitivityScalarValuesReduced ) const
+{
+
+	const double criteria = 1.0e-20;
+	std::vector<double> sensRaw( m_numResistivityBlockTotal, criteria );
+	std::vector<double> sensVol( m_numResistivityBlockTotal, criteria );
+	for( int iblk = 0; iblk < m_numResistivityBlockTotal; ++iblk ){
+		if( isFixedResistivityValue( iblk ) ) continue;
+		const int    imdl = getModelIDFromBlockID( iblk );
+		const double raw  = std::fabs( sensitivityScalarValuesReduced[imdl] );
+		const double vol  = calcVolumeOfBlock( iblk );
+		sensRaw[iblk] = (raw > criteria) ? raw : criteria;
+		sensVol[iblk] = (raw > criteria) ? raw / vol : criteria;
+	}
+
+	const int numElemTotal = ( ( AnalysisControl::getInstance() )->getPointerOfMeshData() )->getNumElemTotal();
+
+	struct FileSpec { const char* prefix; const std::vector<double>* values; };
+	const FileSpec specs[2] = {
+		{ "sensitivity_iter",            &sensRaw },
+		{ "sensitivity_normalized_iter", &sensVol },
+	};
+
+	for( int ifile = 0; ifile < 2; ++ifile ){
+		std::ostringstream fileName;
+		fileName << specs[ifile].prefix << iterNum << ".dat";
+
+		FILE *fp;
+		if( (fp = fopen( fileName.str().c_str(), "w")) == NULL ) {
+			OutputFiles::m_logFile  << "File open error !! : " << fileName.str() << std::endl;
+			exit(1);
+		}
+
+		fprintf(fp, "%10d%10d\n", numElemTotal, m_numResistivityBlockTotal );
+
+		for( int iElem = 0; iElem < numElemTotal; ++iElem ){
+			fprintf(fp, "%10d%10d\n", iElem, m_elementID2blockID[iElem] );
+		}
+
+		const std::vector<double>& values = *specs[ifile].values;
+		for( int iBlk = 0; iBlk < m_numResistivityBlockTotal; ++iBlk ){
+			fprintf(fp, "%10d%5s%15e%15e%15e%15e%10d\n", iBlk, "     ",
+				values[iBlk], 0.0, 0.0, 0.0,
+				getTypeOfResistivityBlock(m_fixResistivityValues[iBlk], m_isolated[iBlk]) );
+		}
+
+		fclose(fp);
+	}
+
 }
 
 void ResistivityBlock::outputAppraisalResistivityBlock(

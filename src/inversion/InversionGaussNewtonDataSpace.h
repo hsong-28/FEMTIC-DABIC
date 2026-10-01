@@ -41,13 +41,13 @@ public:
 	virtual ~InversionGaussNewtonDataSpace();
 
 	// Perform inversion
-	virtual void inversionCalculation();
+	virtual void inversionCalculation( const bool writeJacobianHDF5 = false );
 
 	// Perform inversion by the new method
-	void inversionCalculationByNewMethod() const;
+	void inversionCalculationByNewMethod( const bool writeJacobianHDF5 = false ) const;
 
 	// Perform inversion by the new method using inverse of [R]T[R] matrix
-	void inversionCalculationByNewMethodUsingInvRTRMatrix() const;
+	void inversionCalculationByNewMethodUsingInvRTRMatrix( const bool writeJacobianHDF5 = false ) const;
 
 	// Read sensitivity matrix
 	void readSensitivityMatrix( const std::string& fileName, int& numData, int& numModel, double*& sensitivityMatrix ) const;

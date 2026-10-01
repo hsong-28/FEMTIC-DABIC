@@ -26,6 +26,10 @@
 #include "OutputFiles.h"
 #include "ResistivityBlock.h"
 #include "InversionGaussNewtonDataSpace.h"
+#ifdef _HDF5_JAC
+#include "OutputHDF5.h"
+
+#endif // _HDF5_JAC
 #include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,16 +62,16 @@ InversionGaussNewtonDataSpace::~InversionGaussNewtonDataSpace(){
 }
 
 // Perform inversion
-void InversionGaussNewtonDataSpace::inversionCalculation(){
+void InversionGaussNewtonDataSpace::inversionCalculation( const bool writeJacobianHDF5 ){
 
 	const AnalysisControl* const ptrAnalysisControl = AnalysisControl::getInstance();
 	const int algorithmType = ptrAnalysisControl->getTypeOfDataSpaceAlgorithm();
 	switch(algorithmType){
 		case AnalysisControl::NEW_DATA_SPACE_ALGORITHM:
-			inversionCalculationByNewMethod();
+			inversionCalculationByNewMethod( writeJacobianHDF5 );
 			break;
 		case AnalysisControl::NEW_DATA_SPACE_ALGORITHM_USING_INV_RTR_MATRIX:
-			inversionCalculationByNewMethodUsingInvRTRMatrix();
+			inversionCalculationByNewMethodUsingInvRTRMatrix( writeJacobianHDF5 );
 			break;
 		default:
 			OutputFiles::m_logFile << "Error : Type of data space inversion algorithm is wrong  !! : " << algorithmType << std::endl;
@@ -78,7 +82,7 @@ void InversionGaussNewtonDataSpace::inversionCalculation(){
 }
 
 // Perform inversion by the new method
-void InversionGaussNewtonDataSpace::inversionCalculationByNewMethod() const {
+void InversionGaussNewtonDataSpace::inversionCalculationByNewMethod( const bool writeJacobianHDF5 ) const {
 
 	const bool useBLAS = true;
 
@@ -625,6 +629,27 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethod() const {
 	}
 #endif
 
+#ifdef _HDF5_JAC
+	// Assemble and write jacobian.h5 via the shared implementation (see
+	// Inversion::assembleAndWriteJacobianToHDF5(), added 2026-09-11).
+	// This used to be done inline here (re-reading the sensMatFreq<N>
+	// files a second time); now shared with
+	// InversionGaussNewtonModelSpace::inversionCalculation() and with
+	// AnalysisControl::run()'s early-convergence path, which needs the
+	// exact same logic without the rest of this function's GN-solve
+	// machinery. COLLECTIVE: must be called by every PE (see its
+	// declaration in Inversion.h) -- writeJacobianHDF5 is identical on
+	// every PE, so this call is naturally made by all of them here (note
+	// it is deliberately NOT nested inside the "if( myProcessID == 0 )"
+	// checks used elsewhere in this function for gathering rhsVectorGlobal
+	// etc., since only PE 0 needs those but every PE must call this).
+	if( writeJacobianHDF5 ){
+		assembleAndWriteJacobianToHDF5( ptrAnalysisControl->getIterationNumCurrent() );
+	}
+	//--- end HDF5 Jacobian output ---
+
+#endif // _HDF5_JAC
+
 	//------------------------------------------------------------
 	// Calculate coefficient matrix
 	//------------------------------------------------------------
@@ -786,18 +811,19 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethod() const {
 		OutputFiles::m_logFile << "# Start numerical factorization for normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
 
 		const long long int numModel_64 = static_cast<long long int>(numModel);
+		const MKL_INT numDataTotal_mkl = static_cast<MKL_INT>(numDataTotal_64);
 		const bool positiveDefinite = ptrAnalysisControl->getPositiveDefiniteNormalEqMatrix();
-		lapack_int* ipiv = NULL;
+		MKL_INT* ipiv = NULL;
 		if( !positiveDefinite ){
-			ipiv = new lapack_int[numDataTotal_64];
+			ipiv = new MKL_INT[numDataTotal_64];
 		}
 
-		long long int ierr(0);
+		MKL_INT ierr(0);
 		if( positiveDefinite ){
-			ierr = LAPACKE_dpptrf( LAPACK_COL_MAJOR, 'L', numDataTotal_64, matrixToBeInverted );
+			ierr = LAPACKE_dpptrf_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, matrixToBeInverted );
 		}
 		else{
-			ierr = LAPACKE_dsptrf( LAPACK_COL_MAJOR, 'L', numDataTotal_64, matrixToBeInverted, ipiv );
+			ierr = LAPACKE_dsptrf_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, matrixToBeInverted, ipiv );
 		}
 
 		if( ierr > 0 ) {
@@ -812,13 +838,13 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethod() const {
 		// Solver linear equation with lapack
 		//----------------------------------------------
 		OutputFiles::m_logFile << "# Start solve phase for normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
-		const long long int nrhs = 1;
-		const long long int ldb = numDataTotal_64;
+		const MKL_INT nrhs = 1;
+		const MKL_INT ldb = numDataTotal_mkl;
 		if( positiveDefinite ){
-			ierr = LAPACKE_dpptrs( LAPACK_COL_MAJOR, 'L', numDataTotal_64, nrhs, matrixToBeInverted, rhsVectorGlobal, ldb );
+			ierr = LAPACKE_dpptrs_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, nrhs, matrixToBeInverted, rhsVectorGlobal, ldb );
 		}
 		else{
-			ierr = LAPACKE_dsptrs( LAPACK_COL_MAJOR, 'L', numDataTotal_64, nrhs, matrixToBeInverted, ipiv, rhsVectorGlobal, ldb );
+			ierr = LAPACKE_dsptrs_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, nrhs, matrixToBeInverted, ipiv, rhsVectorGlobal, ldb );
 		}
 
 		if( ierr < 0 ){
@@ -1049,7 +1075,7 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethod() const {
 }
 
 // Perform inversion by the new method using inverse of [R]T[R] matrix
-void InversionGaussNewtonDataSpace::inversionCalculationByNewMethodUsingInvRTRMatrix() const{
+void InversionGaussNewtonDataSpace::inversionCalculationByNewMethodUsingInvRTRMatrix( const bool writeJacobianHDF5 ) const{
 
 	const bool useBLAS = true;
 
@@ -1484,6 +1510,27 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethodUsingInvRTRMa
 	}
 #endif
 
+#ifdef _HDF5_JAC
+	// Assemble and write jacobian.h5 via the shared implementation (see
+	// Inversion::assembleAndWriteJacobianToHDF5(), added 2026-09-11).
+	// This used to be done inline here (re-reading the sensMatFreq<N>
+	// files a second time); now shared with
+	// InversionGaussNewtonModelSpace::inversionCalculation() and with
+	// AnalysisControl::run()'s early-convergence path, which needs the
+	// exact same logic without the rest of this function's GN-solve
+	// machinery. COLLECTIVE: must be called by every PE (see its
+	// declaration in Inversion.h) -- writeJacobianHDF5 is identical on
+	// every PE, so this call is naturally made by all of them here (note
+	// it is deliberately NOT nested inside the "if( myProcessID == 0 )"
+	// checks used elsewhere in this function for gathering rhsVectorGlobal
+	// etc., since only PE 0 needs those but every PE must call this).
+	if( writeJacobianHDF5 ){
+		assembleAndWriteJacobianToHDF5( ptrAnalysisControl->getIterationNumCurrent() );
+	}
+	//--- end HDF5 Jacobian output ---
+
+#endif // _HDF5_JAC
+
 	//------------------------------------------------------------
 	// Calculate coefficient matrix
 	//------------------------------------------------------------
@@ -1645,18 +1692,19 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethodUsingInvRTRMa
 		OutputFiles::m_logFile << "# Start numerical factorization for normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
 
 		const long long int numModel_64 = static_cast<long long int>(numModel);
+		const MKL_INT numDataTotal_mkl = static_cast<MKL_INT>(numDataTotal_64);
 		const bool positiveDefinite = ptrAnalysisControl->getPositiveDefiniteNormalEqMatrix();
-		lapack_int* ipiv = NULL;
+		MKL_INT* ipiv = NULL;
 		if( !positiveDefinite ){
-			ipiv = new lapack_int[numDataTotal_64];
+			ipiv = new MKL_INT[numDataTotal_64];
 		}
 
-		long long int ierr(0);
+		MKL_INT ierr(0);
 		if( positiveDefinite ){
-			ierr = LAPACKE_dpptrf( LAPACK_COL_MAJOR, 'L', numDataTotal_64, matrixToBeInverted );
+			ierr = LAPACKE_dpptrf_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, matrixToBeInverted );
 		}
 		else{
-			ierr = LAPACKE_dsptrf( LAPACK_COL_MAJOR, 'L', numDataTotal_64, matrixToBeInverted, ipiv );
+			ierr = LAPACKE_dsptrf_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, matrixToBeInverted, ipiv );
 		}
 
 		if( ierr > 0 ) {
@@ -1671,13 +1719,13 @@ void InversionGaussNewtonDataSpace::inversionCalculationByNewMethodUsingInvRTRMa
 		// Solver linear equation with lapack
 		//----------------------------------------------
 		OutputFiles::m_logFile << "# Start solve phase for normal equation. " << ptrAnalysisControl->outputElapsedTime() << std::endl;
-		const long long int nrhs = 1;
-		const long long int ldb = numDataTotal_64;
+		const MKL_INT nrhs = 1;
+		const MKL_INT ldb = numDataTotal_mkl;
 		if( positiveDefinite ){
-			ierr = LAPACKE_dpptrs( LAPACK_COL_MAJOR, 'L', numDataTotal_64, nrhs, matrixToBeInverted, rhsVectorGlobal, ldb );
+			ierr = LAPACKE_dpptrs_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, nrhs, matrixToBeInverted, rhsVectorGlobal, ldb );
 		}
 		else{
-			ierr = LAPACKE_dsptrs( LAPACK_COL_MAJOR, 'L', numDataTotal_64, nrhs, matrixToBeInverted, ipiv, rhsVectorGlobal, ldb );
+			ierr = LAPACKE_dsptrs_work( LAPACK_COL_MAJOR, 'L', numDataTotal_mkl, nrhs, matrixToBeInverted, ipiv, rhsVectorGlobal, ldb );
 		}
 
 		if( ierr < 0 ){

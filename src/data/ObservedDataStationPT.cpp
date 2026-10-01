@@ -534,6 +534,31 @@ void ObservedDataStationPT::outputCalculatedValues() const{
 	}
 }
 
+#ifdef _HDF5_OUT
+// Collect this PE's calculated Phase-Tensor values for results_iterN.h5.
+// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
+void ObservedDataStationPT::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
+
+	int icount(0);
+	for( std::vector<int>::const_iterator itr = m_freqIDsAmongThisStationCalculatedByThisPE.begin(); itr != m_freqIDsAmongThisStationCalculatedByThisPE.end(); ++itr ){
+		const double cal[4] = {
+			m_PTxxCalculated[icount], m_PTxyCalculated[icount], m_PTyxCalculated[icount], m_PTyyCalculated[icount]
+		};
+		for( int c = 0; c < 4; ++c ){
+			FemticHDF5CalcRow r;
+			r.site_id   = m_stationID;
+			r.datatype  = FemticHDF5::DTYPE_PT;
+			r.freq      = m_freq[*itr];
+			r.component = c;
+			r.cal_re    = cal[c];
+			r.cal_im    = 0.0;
+			rows.push_back(r);
+		}
+		++icount;
+	}
+}
+#endif // _HDF5_OUT
+
 // Calulate interpolator vector of electric field
 void ObservedDataStationPT::calcInterpolatorVectorOfElectricField( Forward3D* const ptrForward3D ){
 
@@ -757,3 +782,19 @@ void ObservedDataStationPT::setTypeOfElectricField( const int type ){
 	m_typeOfElectricField = type;
 
 }
+#ifdef _HDF5_JAC
+// Collect data-error (SD) vector in same slot order as residual vector
+// (ported from femtic_v4_src, 2026-08-21).
+void ObservedDataStationPT::collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const{
+
+	const int freqIDThisPEInSta = getFreqIDsAmongThisPE( freq );
+	if( freqIDThisPEInSta < 0 ) return;
+	const int freqIDGlobalInSta = m_freqIDsAmongThisStationCalculatedByThisPE[ freqIDThisPEInSta ];
+
+	vector[ offset + m_dataIDOfPTxx[freqIDThisPEInSta] ] = m_PTxxSD[freqIDGlobalInSta];
+	vector[ offset + m_dataIDOfPTxy[freqIDThisPEInSta] ] = m_PTxySD[freqIDGlobalInSta];
+	vector[ offset + m_dataIDOfPTyx[freqIDThisPEInSta] ] = m_PTyxSD[freqIDGlobalInSta];
+	vector[ offset + m_dataIDOfPTyy[freqIDThisPEInSta] ] = m_PTyySD[freqIDGlobalInSta];
+}
+
+#endif // _HDF5_JAC
