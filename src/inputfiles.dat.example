@@ -1,0 +1,13 @@
+# Example inputfiles.dat for FEMTIC (v4 and v5)
+#
+# Any line not present here (or the whole file, if absent) falls back
+# to the previous hard-coded default file name, so this file is purely
+# optional and additive.
+#
+# key = value      (whitespace around '=' is trimmed; keys are
+#                    case-insensitive; '#' or '//' start a comment)
+
+control = control.dat
+mesh    = mesh.dat
+observe = observe.dat
+initial = resistivity_block_iterxxx.dat
