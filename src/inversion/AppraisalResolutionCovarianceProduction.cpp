@@ -354,12 +354,23 @@ std::vector<double> solveDenseLinearSystem(
 	return result;
 }
 
+// The stochastic estimate sum_k r_k*(A r_k) / sum_k r_k*r_k is diag(A).
+//  - model resolution: A = (J^T J + R^T R)^-1 J^T J, diag(A) is the resolution
+//    value itself, so it is reported raw (signed, no sqrt).
+//  - covariance: A = C J^T J C is a covariance matrix, diag(A) is a variance, so
+//    sqrt(|.|) yields a standard deviation.
+bool diagonalUsesSqrt(const ResistivityBlock::AppraisalOutputFamily familyID)
+{
+	return familyID == ResistivityBlock::APPRAISAL_OUTPUT_COVARIANCE_DIAGONAL;
+}
+
 DiagonalStats calculateStats(
 	const std::vector<double>& resultVector,
 	const std::vector<double>& randomVectors,
 	const int numModel,
 	const int numRandomVectors,
-	const int checkpoint)
+	const int checkpoint,
+	const bool takeSqrt)
 {
 	if (checkpoint <= 0 || checkpoint > numRandomVectors) {
 		throw std::runtime_error("Invalid checkpoint for production appraisal.");
@@ -378,7 +389,9 @@ DiagonalStats calculateStats(
 		if (denominator < 1.0e-12) {
 			++stats.zeroDenominatorCount;
 		} else {
-			diagonal = std::sqrt(std::fabs(numerator / denominator));
+			diagonal = takeSqrt
+				? std::sqrt(std::fabs(numerator / denominator))
+				: numerator / denominator;
 		}
 		if (!std::isfinite(diagonal)) {
 			++stats.diagonalNonfiniteCount;
@@ -416,7 +429,8 @@ std::vector<double> calculateDiagonalValues(
 	const std::vector<double>& randomVectors,
 	const int numModel,
 	const int numRandomVectors,
-	const int checkpoint)
+	const int checkpoint,
+	const bool takeSqrt)
 {
 	if (checkpoint <= 0 || checkpoint > numRandomVectors) {
 		throw std::runtime_error("Invalid checkpoint for production appraisal block output.");
@@ -432,8 +446,9 @@ std::vector<double> calculateDiagonalValues(
 			denominator += randomVectors[index] * randomVectors[index];
 		}
 		if (denominator >= 1.0e-12) {
-			diagonalValues[static_cast<std::size_t>(iModel)] =
-				std::sqrt(std::fabs(numerator / denominator));
+			diagonalValues[static_cast<std::size_t>(iModel)] = takeSqrt
+				? std::sqrt(std::fabs(numerator / denominator))
+				: numerator / denominator;
 		}
 	}
 	return diagonalValues;
@@ -460,7 +475,8 @@ std::string writeDiagonalBlockValues(
 		randomVectors,
 		numModel,
 		config.numRandomVectors,
-		checkpoint);
+		checkpoint,
+		diagonalUsesSqrt(familyID));
 	const ResistivityBlock* const ptrResistivityBlock = ResistivityBlock::getInstance();
 	const int numBlocks = ptrResistivityBlock->getNumResistivityBlockTotal();
 	std::vector<double> blockValues(static_cast<std::size_t>(numBlocks), 0.0);
@@ -590,7 +606,8 @@ void appendSummaryRows(
 			randomVectors,
 			bundle.numModel,
 			config.numRandomVectors,
-			*itr);
+			*itr,
+			diagonalUsesSqrt(familyID));
 		const std::string blockDiagonalValuePath = writeDiagonalBlockValues(
 			config,
 			family,
