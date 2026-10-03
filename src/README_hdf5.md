@@ -1,10 +1,10 @@
-# FEMTIC-DABIC v2.7 — Modifications
+# FEMTIC-DABIC v2.7.1 — Modifications
 
 The complete release history is maintained in [CHANGELOG.md](../CHANGELOG.md).
 
 HDF5 and workflow extensions contributed by Volker Rath (DIAS).
 
-This file documents the extensions made to FEMTIC-DABIC v2.7 (ABIC-based
+This file documents the extensions in FEMTIC-DABIC v2.7.1 (ABIC-based
 regularization search by Han Song, cross-gradient/`ConstrainingModel`
 features by Dieno Diba and Han Song, on top of Yoshiya Usui's original
 FEMTIC) beyond the official release described in

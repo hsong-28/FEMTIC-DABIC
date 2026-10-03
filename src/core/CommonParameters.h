@@ -166,7 +166,7 @@ static char programName[]="FEMTIC-DABIC";
 // [MajorVersion#].[MinorVersion#].[Revision#]
 // x.x.xa -> alpha version
 // x.x.xb -> beta version
-static char versionID[]="2.7.0";
+static char versionID[]="2.7.1";
 
 }
 

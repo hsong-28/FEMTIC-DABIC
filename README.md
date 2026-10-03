@@ -6,7 +6,7 @@ inversion method is a data-space variant of Akaike's Bayesian Information
 Criterion (D-DABIC); OCCAM and nonlinear cubic-spline L-curve inversion are
 also supported, together with L2, L1-style, and L0-style regularization.
 
-Current release: **v2.7.0**.
+Current release: **v2.7.1**.
 
 ## Main Features
 
@@ -25,10 +25,10 @@ Current release: **v2.7.0**.
 
 ## Documentation
 
-The complete installation, input, control-keyword, inversion-method, and output
-reference is available in:
+The base user manual and v2.7.1 additions are available in:
 
 - [FEMTIC-DABIC User Manual v2.7.0](docs/FEMTIC-DABIC_UserManual_v2.7.0.pdf)
+- [v2.7.1 HDF5 and workflow additions](src/README_hdf5.md)
 
 ## Build
 
@@ -127,7 +127,7 @@ included in the GitHub source release.
 
 ## Release Note
 
-**Unreleased:** Integrated Volker Rath's HDF5 output
+***v2.7.1*** Oct. 3, 2026: Integrated Volker Rath's HDF5 output
 and Python readers, optional input-file mapping, control-file enhancements,
 sensitivity exports, and signed model-resolution diagonal correction.
 Follow-up maintenance unifies the Makefile, validates control inputs, and

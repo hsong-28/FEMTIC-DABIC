@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-Updated Oct. 3, 2026.
+## v2.7.1 - Oct. 3, 2026
 
 Integrated Volker Rath's HDF5 output
 and Python readers, optional input-file mapping, control-file enhancements,
