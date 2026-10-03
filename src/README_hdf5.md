@@ -131,14 +131,58 @@ directly in `control/AnalysisControl.cpp`'s `control.dat` reader.
 `ECOSYSTEM_STATUS.md` for the full porting notes, including one
 pre-existing v4/v5 limitation flagged rather than silently carried over).
 
-Two independent compile-time flags add optional HDF5 output; the base
-build is completely unaffected when none are set. (Reduced from four flags
-on 2026-10-01, see "exchange.h5" below.)
+Optional HDF5 output is selected in two steps; the base build is completely
+unaffected when no build flag is set. (Reduced from four flags on
+2026-10-01, see "exchange.h5" below; run-time keywords added 2026-10-02.)
 
-| Flag | Preprocessor define | Output file(s) |
+**Step 1, at build time: is the HDF5 support compiled and linked in?** The
+HDF5 library has to be linked, so this part cannot move into `control.dat`.
+
+| Build flag | Preprocessor define | Compiles in support for |
 |---|---|---|
 | `HDF5_OUT=yes` | `-D_HDF5_OUT` | `results_iterX.h5` (model+data+distortion, since 2026-09-13) |
 | `HDF5_JAC=yes` | `-D_HDF5_JAC` | `exchange.h5` (Jacobian + roughening matrix + mesh, one file; since 2026-10-01; executable suffix `_exchange`) |
+
+**Step 2, at run time (since 2026-10-02): is the file written in this run?**
+That is now decided in `control.dat`, no longer by the build:
+
+| `control.dat` keyword | Needs build flag | Effect when set |
+|---|---|---|
+| `ACTIVATE_HDF5_RESULTS` | `HDF5_OUT=yes` | write `results_iterX.h5` every iteration |
+| `ACTIVATE_HDF5_EXCHANGE` | `HDF5_JAC=yes` | write `exchange.h5` (last scheduled iteration or on convergence, as below) |
+
+```
+# control.dat (any position; the order of keywords does not matter)
+ACTIVATE_HDF5_RESULTS            # keyword alone switches the feature on
+ACTIVATE_HDF5_EXCHANGE 1         # explicit 1 (on) or 0 (off) is also accepted,
+                                 # on the same line or the next one
+```
+
+- Both keywords are optional and default to **off**. A binary built with
+  HDF5 support therefore writes no `.h5` file unless `control.dat` asks for
+  it. (Before 2026-10-02 a build with `HDF5_OUT=yes` / `HDF5_JAC=yes` wrote
+  the files in every run; existing `control.dat` files need the keyword
+  added to keep that behaviour.)
+- Any value other than `0` or `1` is an error (`exit(1)`, message in the log).
+- Asking for a feature the executable was **not** built with
+  (`ACTIVATE_HDF5_RESULTS` without `HDF5_OUT=yes`, `ACTIVATE_HDF5_EXCHANGE`
+  without `HDF5_JAC=yes`) stops the run at start-up with an error naming the
+  missing make flag, on the console (PE 0) and in the log, rather than
+  silently producing no file. `ACTIVATE_HDF5_...  0` is always accepted.
+- The start-up log lists both outputs as ON/OFF, and says "compiled in" or
+  "not compiled in" for each, e.g.
+  `# HDF5 exchange output (exchange.h5) : OFF (compiled in; add ACTIVATE_HDF5_EXCHANGE to control.dat to enable).`
+- The switches are read by every PE from the same `control.dat`, so the
+  collective MPI calls inside the gated code (the calculated-value gather for
+  `results_iterX.h5`, the Jacobian assembly for `exchange.h5`) are entered by
+  all PEs or by none.
+- Implementation: `AnalysisControl::isHDF5ResultsActive()` /
+  `isHDF5ExchangeActive()` (`control/AnalysisControl.h`, parsed in
+  `inputControlData()`), used in `AnalysisControl::run()` (the gather and
+  `outputResultsToHDF5()`; the `assembleAndWriteJacobianToHDF5()` call and its
+  log notes) and in the four `writeJacobianHDF5ThisIter` definitions in
+  `AnalysisControlOCCAMLineSearch.cpp`. The `#ifdef _HDF5_*` guards are
+  unchanged and still keep all HDF5 code out of builds without support.
 
 ```bash
 make HDF5_OUT=yes
@@ -529,6 +573,28 @@ confirmation that every trade-off mode (`TO_Fixed`, `TO_ABIC_LS`,
 `TO_DATA_FIT_COOLING`) is correctly covered by this single change.
 
 **Files touched:** `control/AnalysisControl.cpp`.
+
+---
+
+### 2026-10-02: HDF5 outputs switched on from `control.dat` (`ACTIVATE_HDF5_RESULTS`, `ACTIVATE_HDF5_EXCHANGE`)
+
+The build flags `HDF5_OUT` / `HDF5_JAC` no longer decide whether
+`results_iterX.h5` / `exchange.h5` are written; they only compile the
+support in. Each run chooses with the new `control.dat` keywords, both
+default off (details and the error behaviour in section 2 above).
+Files touched: `control/AnalysisControl.h` (two enum IDs, two members, two
+getters), `control/AnalysisControl.cpp` (parsing, start-up log lines, run-time
+gates around the results gather/write and the exchange write),
+`control/AnalysisControlGetters.cpp`, `control/AnalysisControlOCCAMLineSearch.cpp`
+(`writeJacobianHDF5ThisIter` now also requires the exchange switch),
+`Makefile_hdf5` (comment only), this README.
+Behaviour change to be aware of: HDF5-enabled builds no longer write the
+`.h5` files unless `control.dat` contains the keywords.
+Verification: syntax check only (`g++ -fsyntax-only -Wall -Wextra`, stub MPI/MKL
+headers) of the three `control/AnalysisControl*.cpp` files in all four
+`_HDF5_OUT`/`_HDF5_JAC` combinations (no errors, warning count equal to the
+base commit), plus a stand-alone test of the keyword parser on 12 `control.dat`
+snippets. Not built with the real MPI/MKL/HDF5 toolchain and not run.
 
 ---
 

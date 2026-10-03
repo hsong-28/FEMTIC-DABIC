@@ -412,6 +412,18 @@ public:
 	std::string getAppraisalOutputDirectory() const;
 	bool writeLegacyAppraisalDsdkFiles() const;
 
+	// Runtime HDF5 switches (2026-10-02), set by the control.dat keywords
+	// ACTIVATE_HDF5_RESULTS and ACTIVATE_HDF5_EXCHANGE (both default to off).
+	// true  => the corresponding file is written. A keyword can only turn a
+	//          feature on if the binary was built with the matching compile-time
+	//          support (HDF5_OUT=yes / HDF5_JAC=yes in Makefile_hdf5);
+	//          otherwise inputControlData() stops with an error, so these
+	//          getters never return true in a build without that support.
+	// Identical on every PE (every PE reads the same control.dat), which the
+	// collective MPI calls inside the gated blocks rely on.
+	bool isHDF5ResultsActive() const;
+	bool isHDF5ExchangeActive() const;
+
 	// Get pointer to the object of class Forward3D
 	Forward3D *getPointerOfForward3D() const;
 
@@ -512,6 +524,8 @@ private:
 		APP_PHS_OPTION,
 		OUTPUT_ROUGH_MATRIX,
 		DATA_SPACE_METHOD,
+		ACTIVATE_HDF5_RESULTS,  // 2026-10-02: runtime switch for results_iterX.h5
+		ACTIVATE_HDF5_EXCHANGE, // 2026-10-02: runtime switch for exchange.h5
 #ifdef _ANISOTOROPY
 		ANISOTROPY,
 #endif
@@ -843,6 +857,11 @@ private:
 	std::string m_appraisalInputSensitivityDirectory;
 	std::string m_appraisalOutputDirectory;
 	bool m_writeLegacyAppraisalDsdkFiles;
+
+	// Runtime HDF5 switches (see isHDF5ResultsActive()/isHDF5ExchangeActive()).
+	// (default member initializers: off unless the keyword is present)
+	bool m_activateHDF5Results = false;
+	bool m_activateHDF5Exchange = false;
 
 	// Terminate the inversion loop if nonlinear L-curve diagnostics cannot select an alpha
 	bool m_stopAfterNonlinearLCurveDiagnostics;

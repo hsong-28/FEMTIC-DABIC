@@ -1110,7 +1110,10 @@ void AnalysisControl::run()
 				// accepted iteration. Both conditions are identical on all PEs
 				// (iter and the broadcast convergenceFlag), as the collective
 				// assembly requires.
-				if( calculateSensitivity &&
+				// Changed 2026-10-02: additionally gated at run time by the
+				// control.dat keyword ACTIVATE_HDF5_EXCHANGE (the same value on
+				// every PE, as the collective assembly requires).
+				if( isHDF5ExchangeActive() && calculateSensitivity &&
 				    ( convergenceFlag == AnalysisControl::INVERSIN_CONVERGED ||
 				      iter == m_iterationNumMax - 1 ) ){
 					m_ptrInversion->assembleAndWriteJacobianToHDF5( iter );
@@ -1126,8 +1129,10 @@ void AnalysisControl::run()
 				// already reflects the last iteration whose retrial DID
 				// succeed (written above), which is the correct artifact
 				// to keep.
-				OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
-			                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+				if( isHDF5ExchangeActive() ){
+					OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
+				                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+				}
 #endif // _HDF5_JAC
 				break;
 			}
@@ -1165,8 +1170,10 @@ void AnalysisControl::run()
 			// reflects the last iteration whose retrial DID succeed
 			// (written above, at the point convergenceFlag was accepted),
 			// which is the correct artifact to keep.
-			OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
-			                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+			if( isHDF5ExchangeActive() ){
+				OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
+				                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+			}
 #endif // _HDF5_JAC
 			break;
 		}
@@ -1182,8 +1189,10 @@ void AnalysisControl::run()
 			// to keep -- attempting a new assembly from this failed
 			// retrial's data is both unnecessary and was the source of a
 			// same-node file-visibility race observed on a real run.
-			OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
-			                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+			if( isHDF5ExchangeActive() ){
+				OutputFiles::m_logFile << "# Note: exchange.h5 is written only at the last scheduled iteration or on convergence;"
+				                       << " this run ended before either, so no (new) exchange.h5 was written." << std::endl;
+			}
 #endif // _HDF5_JAC
 			break;
 		}
@@ -1208,29 +1217,34 @@ void AnalysisControl::run()
 		// myProcessID==0 -- that is exactly the class of deadlock fixed
 		// 2026-09-09 for getSensitivityScalarValuesReduced() below, and the
 		// same MPI_Gatherv pattern used there is reused here.
-		std::vector<FemticHDF5CalcRow> calcRowsThisPE;
-		pObservedData->collectCalculatedValuesForHDF5( calcRowsThisPE );
-
-		const int numProcessTotalForCalc = getTotalPE();
-		const int nRowsThisPE = (int)calcRowsThisPE.size();
-		std::vector<int> calcCountsAll( numProcessTotalForCalc );
-		MPI_Allgather( &nRowsThisPE, 1, MPI_INT, calcCountsAll.data(), 1, MPI_INT, MPI_COMM_WORLD );
-
-		std::vector<int> calcByteCounts( numProcessTotalForCalc );
-		std::vector<int> calcByteDispls( numProcessTotalForCalc + 1, 0 );
-		for( int i = 0; i < numProcessTotalForCalc; ++i ){
-			calcByteCounts[i]  = calcCountsAll[i] * (int)sizeof(FemticHDF5CalcRow);
-			calcByteDispls[i+1] = calcByteDispls[i] + calcByteCounts[i];
-		}
-		const int calcTotalBytes = calcByteDispls[numProcessTotalForCalc];
-
+		// Run-time gate (2026-10-02): only when ACTIVATE_HDF5_RESULTS is set in
+		// control.dat. The value is identical on every PE, so either all PEs
+		// enter this collective block or none does.
 		std::vector<FemticHDF5CalcRow> calcRowsAll;
-		if( myProcessID == 0 ){
-			calcRowsAll.resize( calcTotalBytes / (int)sizeof(FemticHDF5CalcRow) );
+		if( isHDF5ResultsActive() ){
+			std::vector<FemticHDF5CalcRow> calcRowsThisPE;
+			pObservedData->collectCalculatedValuesForHDF5( calcRowsThisPE );
+
+			const int numProcessTotalForCalc = getTotalPE();
+			const int nRowsThisPE = (int)calcRowsThisPE.size();
+			std::vector<int> calcCountsAll( numProcessTotalForCalc );
+			MPI_Allgather( &nRowsThisPE, 1, MPI_INT, calcCountsAll.data(), 1, MPI_INT, MPI_COMM_WORLD );
+
+			std::vector<int> calcByteCounts( numProcessTotalForCalc );
+			std::vector<int> calcByteDispls( numProcessTotalForCalc + 1, 0 );
+			for( int i = 0; i < numProcessTotalForCalc; ++i ){
+				calcByteCounts[i]  = calcCountsAll[i] * (int)sizeof(FemticHDF5CalcRow);
+				calcByteDispls[i+1] = calcByteDispls[i] + calcByteCounts[i];
+			}
+			const int calcTotalBytes = calcByteDispls[numProcessTotalForCalc];
+
+			if( myProcessID == 0 ){
+				calcRowsAll.resize( calcTotalBytes / (int)sizeof(FemticHDF5CalcRow) );
+			}
+			MPI_Gatherv( calcRowsThisPE.data(), nRowsThisPE * (int)sizeof(FemticHDF5CalcRow), MPI_BYTE,
+			             myProcessID == 0 ? calcRowsAll.data() : NULL, calcByteCounts.data(), calcByteDispls.data(), MPI_BYTE,
+			             0, MPI_COMM_WORLD );
 		}
-		MPI_Gatherv( calcRowsThisPE.data(), nRowsThisPE * (int)sizeof(FemticHDF5CalcRow), MPI_BYTE,
-		             myProcessID == 0 ? calcRowsAll.data() : NULL, calcByteCounts.data(), calcByteDispls.data(), MPI_BYTE,
-		             0, MPI_COMM_WORLD );
 #endif // _HDF5_OUT
 
 		// Output resistivity model
@@ -1300,7 +1314,9 @@ void AnalysisControl::run()
 			// outputDistortionParams() above still writes
 			// distortion_iterN.dat separately/unchanged; outputResultsToHDF5()
 			// additionally embeds the same numbers in /distortion.
-			outputResultsToHDF5( iter, sensReducedForOutput, calcRowsAll );
+			if( isHDF5ResultsActive() ){
+				outputResultsToHDF5( iter, sensReducedForOutput, calcRowsAll );
+			}
 
 #endif // _HDF5_OUT
 		}
@@ -3213,6 +3229,84 @@ void AnalysisControl::inputControlData()
 		m_typeOfDataSpaceAlgorithm = ibuf;
 		hasAlreadyRead[paramID] = true;
 	}
+
+	// Optional HDF5 outputs (2026-10-02). These replace the former
+	// compile-time-only selection: the Makefile flags HDF5_OUT / HDF5_JAC now
+	// only decide whether the HDF5 support is compiled and linked in, and
+	// these two keywords decide, per run, whether the files are written.
+	//   ACTIVATE_HDF5_RESULTS    results_iterX.h5 (model + data + distortion)
+	//   ACTIVATE_HDF5_EXCHANGE   exchange.h5 (Jacobian + roughening matrix + mesh)
+	// Each keyword may stand alone (= on) or be followed by an explicit 0/1 on
+	// the same or the next line. Absent keyword = off.
+	auto readOptionalFlag = [&inFile](const char *keyword) -> bool
+	{
+		const std::istringstream::pos_type posAfterKeyword = inFile.tellg();
+		std::string next;
+		if (inFile >> next)
+		{
+			if (next == "1")
+			{
+				return true;
+			}
+			if (next == "0")
+			{
+				return false;
+			}
+			const char first = next[0];
+			if ((first >= '0' && first <= '9') || first == '-' || first == '+' || first == '.')
+			{
+				OutputFiles::m_logFile << "Error : " << keyword << " must be 0 or 1 (or have no value) : " << next << std::endl;
+				exit(1);
+			}
+		}
+		// No explicit value: the next token (if any) is the following keyword.
+		inFile.clear();
+		inFile.seekg(posAfterKeyword);
+		return true;
+	};
+#if !defined(_HDF5_OUT) || !defined(_HDF5_JAC)
+	auto failHDF5NotCompiledIn = [this](const char *keyword, const char *makeFlag)
+	{
+		OutputFiles::m_logFile
+			<< "Error : " << keyword << " is set in control.dat, but this executable was built without that HDF5 support. "
+			<< "Rebuild with " << makeFlag << "=yes (make -f Makefile_hdf5 " << makeFlag << "=yes), or remove "
+			<< keyword << " from control.dat." << std::endl;
+		if (m_myPE == 0)
+		{
+			std::cerr << " Error : " << keyword << " is set in control.dat, but this executable was built without HDF5 support ("
+				<< makeFlag << "=yes). Rebuild or remove the keyword." << std::endl;
+		}
+		exit(1);
+	};
+#endif // !_HDF5_OUT || !_HDF5_JAC
+	if (seekKeyword("ACTIVATE_HDF5_RESULTS", 21))
+	{
+		const int paramID = AnalysisControl::ACTIVATE_HDF5_RESULTS;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ACTIVATE_HDF5_RESULTS");
+		const bool requested = readOptionalFlag("ACTIVATE_HDF5_RESULTS");
+#ifndef _HDF5_OUT
+		if (requested)
+		{
+			failHDF5NotCompiledIn("ACTIVATE_HDF5_RESULTS", "HDF5_OUT");
+		}
+#endif // !_HDF5_OUT
+		m_activateHDF5Results = requested;
+		hasAlreadyRead[paramID] = true;
+	}
+	if (seekKeyword("ACTIVATE_HDF5_EXCHANGE", 22))
+	{
+		const int paramID = AnalysisControl::ACTIVATE_HDF5_EXCHANGE;
+		ControlKeywords::ensureNotAlreadyRead(hasAlreadyRead, paramID, "ACTIVATE_HDF5_EXCHANGE");
+		const bool requested = readOptionalFlag("ACTIVATE_HDF5_EXCHANGE");
+#ifndef _HDF5_JAC
+		if (requested)
+		{
+			failHDF5NotCompiledIn("ACTIVATE_HDF5_EXCHANGE", "HDF5_JAC");
+		}
+#endif // !_HDF5_JAC
+		m_activateHDF5Exchange = requested;
+		hasAlreadyRead[paramID] = true;
+	}
 #ifdef _ANISOTOROPY
 	if (seekKeyword("ANISOTROPY", 10))
 	{
@@ -3864,6 +3958,20 @@ void AnalysisControl::inputControlData()
 		OutputFiles::m_logFile << "# Appraisal run-local sensitivity directory : " << m_appraisalInputSensitivityDirectory << "." << std::endl;
 		OutputFiles::m_logFile << "# Appraisal output directory : " << m_appraisalOutputDirectory << "." << std::endl;
 	}
+
+	// HDF5 outputs: runtime state, plus whether the support is compiled in.
+#ifdef _HDF5_OUT
+	OutputFiles::m_logFile << "# HDF5 results output (results_iterX.h5) : "
+		<< (m_activateHDF5Results ? "ON" : "OFF (compiled in; add ACTIVATE_HDF5_RESULTS to control.dat to enable)") << "." << std::endl;
+#else
+	OutputFiles::m_logFile << "# HDF5 results output (results_iterX.h5) : OFF (not compiled in; build with HDF5_OUT=yes)." << std::endl;
+#endif // _HDF5_OUT
+#ifdef _HDF5_JAC
+	OutputFiles::m_logFile << "# HDF5 exchange output (exchange.h5) : "
+		<< (m_activateHDF5Exchange ? "ON" : "OFF (compiled in; add ACTIVATE_HDF5_EXCHANGE to control.dat to enable)") << "." << std::endl;
+#else
+	OutputFiles::m_logFile << "# HDF5 exchange output (exchange.h5) : OFF (not compiled in; build with HDF5_JAC=yes)." << std::endl;
+#endif // _HDF5_JAC
 
 	OutputFiles::m_logFile << "# Factor of inverse distance weighting : " << ptrResistivityBlock->getInverseDistanceWeightingFactor() << "." << std::endl;
 

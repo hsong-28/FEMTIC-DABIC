@@ -92,6 +92,12 @@ endif
 #                                       Jacobian is written)
 #
 # The flags are independent; OutputHDF5.o is added to OBJS whenever either is set.
+#
+# Since 2026-10-02 these flags only decide whether the HDF5 support is compiled
+# and linked in. Whether a file is actually written in a given run is chosen in
+# control.dat with the keywords ACTIVATE_HDF5_RESULTS (needs HDF5_OUT=yes) and
+# ACTIVATE_HDF5_EXCHANGE (needs HDF5_JAC=yes); both default to off. Asking for a
+# feature the executable was not built with stops the run with an error.
 # (HDF5_ROUGH / HDF5_MESH no longer exist: rough and mesh are part of exchange.h5.
 # Passing either as 'yes' prints a warning and enables HDF5_JAC instead.)
 #

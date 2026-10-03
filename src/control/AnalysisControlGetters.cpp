@@ -458,3 +458,15 @@ bool AnalysisControl::writeLegacyAppraisalDsdkFiles() const
 {
 	return m_writeLegacyAppraisalDsdkFiles;
 }
+
+// Runtime HDF5 switches, set by ACTIVATE_HDF5_RESULTS / ACTIVATE_HDF5_EXCHANGE
+// in control.dat (2026-10-02). See AnalysisControl.h.
+bool AnalysisControl::isHDF5ResultsActive() const
+{
+	return m_activateHDF5Results;
+}
+
+bool AnalysisControl::isHDF5ExchangeActive() const
+{
+	return m_activateHDF5Exchange;
+}

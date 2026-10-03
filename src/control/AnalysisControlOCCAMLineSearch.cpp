@@ -21,7 +21,8 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 
 	// Femtic Jacobians can be very large, so the optional HDF5 Jacobian
 	// dump (jacobian.h5, guarded by _HDF5_JAC) is only written once, for
-	// the last outer iteration at which it is computed -- see the matching
+	// the last outer iteration at which it is computed (and only when
+	// ACTIVATE_HDF5_EXCHANGE is set in control.dat, 2026-10-02) -- see the matching
 	// comment in AnalysisControl::run() for why iter == m_iterationNumMax-1
 	// is the right deterministic condition. This OCCAM line search tries
 	// many trade-off-parameter candidates per outer iteration, each calling
@@ -29,7 +30,7 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 	// during the final outer iteration jacobian.h5 gets (harmlessly)
 	// overwritten by each candidate in turn and ends up holding the last
 	// one evaluated (2026-08-30).
-	const bool writeJacobianHDF5ThisIter = ( m_iterationNumCurrent == m_iterationNumMax - 1 );
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	if (myProcessID == 0)
 	{
@@ -244,7 +245,7 @@ void AnalysisControl::minbrkOCC()
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
 	ObservedData *const ptrObservedData = ObservedData::getInstance();
 	// See the matching comment in runOCCAMLineSearch() above / AnalysisControl::run().
-	const bool writeJacobianHDF5ThisIter = ( m_iterationNumCurrent == m_iterationNumMax - 1 );
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCB);
 	m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
@@ -367,7 +368,7 @@ double AnalysisControl::frootOCC()
 	const double EPS = 3.E-8;
 	const double tol = 0.1;
 	// See the matching comment in runOCCAMLineSearch() above / AnalysisControl::run().
-	const bool writeJacobianHDF5ThisIter = ( m_iterationNumCurrent == m_iterationNumMax - 1 );
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	double aa = m_tradeOffParameterOCClb;
 	double b = m_tradeOffParameterOCCub;
@@ -514,7 +515,7 @@ double AnalysisControl::fminbrentOCC()
 	const double ZEPS = 1.0E-10;
 	const double tol = 0.1;
 	// See the matching comment in runOCCAMLineSearch() above / AnalysisControl::run().
-	const bool writeJacobianHDF5ThisIter = ( m_iterationNumCurrent == m_iterationNumMax - 1 );
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	double lowerBound = std::min(m_tradeOffParameterOCCC, m_tradeOffParameterOCCA);
 	double upperBound = std::max(m_tradeOffParameterOCCC, m_tradeOffParameterOCCA);
