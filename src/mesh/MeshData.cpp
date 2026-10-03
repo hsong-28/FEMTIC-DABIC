@@ -119,6 +119,14 @@ int MeshData::getNumNodeTotal() const{
 	return m_numNodeTotal;
 }
 
+#if defined(_HDF5_OUT) || defined(_HDF5_JAC)
+// Get number of nodes per element (ported from femtic_v4_src, 2026-08-21)
+int MeshData::getNumNodePerElement() const{
+	return m_numNodeOneElement;
+}
+
+#endif // _HDF5_OUT || _HDF5_JAC
+
 // Get total number of elements belonging to the boundary planes
 int MeshData::getNumElemOnBoundaryPlanes( const int iPlane ) const{
 

@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-14).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -23,6 +27,8 @@
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
 #include "Inversion.h"
+#include <limits>
+#include <new>
 #include "ObservedData.h"
 #include "AnalysisControl.h"
 #include "OutputFiles.h"
@@ -30,6 +36,14 @@
 #include "RougheningMatrix.h"
 #include "ComplexSparseMatrix.h"
 #include "MeshDataBrickElement.h"
+#ifdef _HDF5_JAC
+#include "OutputHDF5.h"
+#endif // _HDF5_JAC
+#ifdef _HDF5_JAC
+#ifdef _LINUX
+#include <unistd.h>
+#endif // _LINUX
+#endif // _HDF5_JAC
 #include <sstream>
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,7 +233,11 @@ void Inversion::calculateSensitivityMatrix( const int freqIDAmongThisPE, const d
 	//---------------------------------------------
 	//--- Calculate scaled sensitivity values ---
 	//---------------------------------------------
-	if( ptrAnalysisControl->doesOutputToVTK( AnalysisControl::OUTPUT_SENSITIVITY) ){// if output sensitivity
+	if( ptrAnalysisControl->doesOutputToVTK( AnalysisControl::OUTPUT_SENSITIVITY)
+		|| true // always accumulate -- see the matching allocation-site
+		        // comment in AnalysisControl.cpp (2026-09-14) for why this
+		        // is now unconditional
+		){// if output sensitivity, HDF5 model output, or the sensitivity .dat files
 
 		const int nBlkTotal = ptrResistivityBlock->getNumResistivityBlockTotal();
 		for( int iblk = 0; iblk < nBlkTotal; ++iblk ){
@@ -1021,6 +1039,229 @@ int Inversion::getNumberOfModel() const{
 	return numModel;
 
 }
+
+// Return globally-reduced sensitivity scalar values (sum over all PEs).
+// Caller must delete[] the returned array. Ported from femtic_v4_src, 2026-08-21.
+// COLLECTIVE CALL: this performs MPI_Allreduce internally, so it must be
+// invoked by every PE in MPI_COMM_WORLD, never from a "myProcessID == 0"-only
+// branch — doing so deadlocks the run (fixed in AnalysisControl.cpp,
+// 2026-09-09; every PE now calls this before branching on myProcessID, and
+// only PE 0's result is actually used/written).
+// Made unconditional (no longer requires _HDF5_OUT) 2026-09-14, since
+// ResistivityBlock::outputSensitivityBlock() now also writes the reduced
+// sensitivity into sensitivity_iterN.dat / sensitivity_normalized_iterN.dat
+// unconditionally -- see AnalysisControl.cpp's call site and that
+// function's changelog for that date.
+double* Inversion::getSensitivityScalarValuesReduced() const{
+	const int numModel = getNumberOfModel();
+	double* out = new double[numModel];
+	MPI_Allreduce( m_sensitivityScalarValues, out, numModel, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+	return out;
+}
+
+#ifdef _HDF5_JAC
+// Assemble the full dense Jacobian for iterNum from the out-of-core
+// per-frequency sensitivity-matrix files and write jacobian.h5. Ported
+// from femtic_v4_src, 2026-09-11 -- see the declaration in Inversion.h
+// for why this exists as a shared function and who calls it. COLLECTIVE
+// CALL: performs MPI_Allgather and MPI_Gatherv, so must be invoked by
+// every PE — never from a "myProcessID == 0"-only branch (same class of
+// deadlock as getSensitivityScalarValuesReduced() above and the original
+// _HDF5_JAC bug fixed 2026-09-09).
+void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
+
+	const AnalysisControl* const ptrAnalysisControl = AnalysisControl::getInstance();
+	const int myProcessID = ptrAnalysisControl->getMyPE();
+	const int numProcessTotal = ptrAnalysisControl->getTotalPE();
+
+	ObservedData* const ptrObservedData = ObservedData::getInstance();
+	const int numDataThisPE = ptrObservedData->getNumObservedDataThisPETotal();
+
+	int* numDataLocal = new int[numProcessTotal];
+	MPI_Allgather( &numDataThisPE, 1, MPI_INT, numDataLocal, 1, MPI_INT, MPI_COMM_WORLD );
+
+	int* displacements = new int[ numProcessTotal + 1 ];
+	displacements[0] = 0;
+	for( int i = 0; i < numProcessTotal; ++i ){
+		if( numDataLocal[i] < 0 || numDataLocal[i] > std::numeric_limits<int>::max() - displacements[i] ){
+			if( myProcessID == 0 ) OutputFiles::m_logFile << "# Warning: invalid or overflowing HDF5 data count -- skipping exchange.h5." << std::endl;
+			delete [] numDataLocal;
+			delete [] displacements;
+			return; // All PEs have identical gathered counts.
+		}
+		displacements[i+1] = displacements[i] + numDataLocal[i];
+	}
+	const int numDataTotal = displacements[numProcessTotal];
+
+	const int numModel = getNumberOfModel();
+	const long long int numModel_64     = static_cast<long long int>(numModel);
+	const long long int numDataTotal_64 = static_cast<long long int>(numDataTotal);
+
+	// --- gather per-datum error/SD vector collectively, on EVERY PE ---
+	double* errVecThisPE = new double[numDataThisPE];
+	for( int i = 0; i < numDataThisPE; ++i ) errVecThisPE[i] = 0.0;
+	ptrObservedData->collectErrorVectorOfDataThisPE( errVecThisPE );
+	double* errVecTotal = NULL;
+	if( myProcessID == 0 ) errVecTotal = new double[numDataTotal];
+	MPI_Gatherv( errVecThisPE, numDataThisPE, MPI_DOUBLE,
+	             errVecTotal, numDataLocal, displacements, MPI_DOUBLE,
+	             0, MPI_COMM_WORLD );
+	delete [] errVecThisPE;
+	delete [] numDataLocal;
+	delete [] displacements;
+
+	if( myProcessID != 0 ){
+		// Only PE 0 holds/reads the full out-of-core files and writes.
+		return;
+	}
+
+	const int nFreq = ptrObservedData->getTotalNumberOfDifferenetFrequencies();
+
+	// sensMatFreq<N> files are written by calculateSensitivityMatrix() in
+	// row-major [numDataThisFreq][numModel] order (model index fastest);
+	// concatenating them along the data axis therefore already yields the
+	// exact [numDataTotal][numModel] row-major layout outputJacobianToHDF5()
+	// writes to /jacobian -- no transpose is needed here.
+	if( numModel <= 0 || numDataTotal <= 0 ||
+	    static_cast<size_t>(numDataTotal) > std::numeric_limits<size_t>::max() / sizeof(double) / static_cast<size_t>(numModel) ){
+		OutputFiles::m_logFile << "# Warning: invalid or overflowing Jacobian dimensions -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+		delete [] errVecTotal;
+		return;
+	}
+	const size_t numValues = static_cast<size_t>(numDataTotal) * static_cast<size_t>(numModel);
+	double* jacRowMajor = new(std::nothrow) double[numValues];
+	if( jacRowMajor == NULL ){
+		OutputFiles::m_logFile << "# Warning: cannot allocate the optional Jacobian buffer -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+		delete [] errVecTotal;
+		return;
+	}
+	for( size_t i = 0; i < numValues; ++i ){
+		jacRowMajor[i] = 0.0;
+	}
+
+	// IMPORTANT (fixed 2026-09-12, after a real run crashed): missing or
+	// mismatched sensMatFreq<N> files must NEVER call exit()/abort() here.
+	// This function runs on PE 0 only (see the early return above), and
+	// jacobian.h5 is an optional diagnostic dump layered on top of an
+	// otherwise-complete inversion; a hard exit() on PE 0 alone, outside
+	// MPI_Finalize/MPI_Abort, does not cleanly shut down the job -- under
+	// mpirun it manifests as "BAD TERMINATION ... KILLED BY SIGNAL: 9" on
+	// every OTHER rank, discarding a run that may have taken hours.
+	// (readSensitivityMatrix()-style helpers elsewhere in this codebase
+	// correctly exit() on a missing file because those reads are load-
+	// bearing for the inversion itself; this one is not, so the failure
+	// mode must be "skip the Jacobian, keep the run's real result" rather
+	// than "kill everything".) On any problem, log a clear warning,
+	// release what's been allocated so far, and return without writing
+	// jacobian.h5 -- the rest of the program is unaffected either way.
+	bool ok = true;
+	long long int numDataAccumulated_64(0);
+	for( int iFreq = 0; ok && iFreq < nFreq; ++iFreq ){
+
+		const int freqID = iFreq;
+		std::ostringstream fileName;
+		if( !ptrAnalysisControl->getDirectoryOfOutOfCoreFilesForSensitivityMatrix().empty() ){
+#ifdef _LINUX
+			fileName << ptrAnalysisControl->getDirectoryOfOutOfCoreFilesForSensitivityMatrix() + "\/";
+#else
+			fileName << ptrAnalysisControl->getDirectoryOfOutOfCoreFilesForSensitivityMatrix() + "\\";
+#endif
+		}
+		fileName << "sensMatFreq" << freqID;
+		// Retry-with-backoff before giving up (added 2026-09-12, after a
+		// real crashed run whose root cause could not be conclusively
+		// identified -- see ECOSYSTEM_STATUS.md. All structural
+		// explanations checked out (frequency-to-PE assignment is a
+		// complete, non-overlapping partition; convergence/retrial state
+		// is broadcast so every PE is synchronized; all ranks were on the
+		// same node, ruling out cross-node filesystem cache-visibility
+		// delay), leaving a transient same-node I/O race under heavy
+		// concurrent multi-rank file I/O as the leading hypothesis. A
+		// short bounded retry costs nothing in the common case (the file
+		// is normally already there) and may paper over exactly that kind
+		// of race if it's the real cause; if it isn't, this still falls
+		// through to the same graceful warning-and-skip as before.
+		FILE* fp = NULL;
+		for( int attempt = 0; attempt < 5 && fp == NULL; ++attempt ){
+			fp = fopen( fileName.str().c_str(), "rb" );
+#ifdef _LINUX
+			if( fp == NULL && attempt < 4 ) usleep( 200000 ); // 200 ms
+#endif // _LINUX
+		}
+		if( fp == NULL ){
+			OutputFiles::m_logFile << "# Warning: could not open " << fileName.str()
+			                       << " while assembling jacobian.h5 for iteration " << iterNum
+			                       << " -- skipping the Jacobian dump for this iteration"
+			                       << " (the rest of the run is unaffected)." << std::endl;
+			ok = false;
+			break;
+		}
+
+		int numDataThisFreq(0);
+		int numModelTemp(0);
+		if( fread( &numDataThisFreq, sizeof(int), 1, fp ) != 1 ||
+		    fread( &numModelTemp, sizeof(int), 1, fp ) != 1 ){
+			OutputFiles::m_logFile << "# Warning: incomplete sensitivity header in " << fileName.str()
+			                       << " -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+			fclose( fp );
+			ok = false;
+			break;
+		}
+		if( numModel != numModelTemp ){
+			OutputFiles::m_logFile << "# Warning: " << fileName.str()
+			                       << " has numModel=" << numModelTemp << ", expected " << numModel
+			                       << " -- skipping the Jacobian dump for iteration " << iterNum
+			                       << " (the rest of the run is unaffected)." << std::endl;
+			fclose( fp );
+			ok = false;
+			break;
+		}
+		if( numDataThisFreq < 0 || static_cast<long long int>(numDataThisFreq) > numDataTotal_64 - numDataAccumulated_64 ){
+			OutputFiles::m_logFile << "# Warning: " << fileName.str()
+			                       << " has an invalid row count " << numDataThisFreq
+			                       << " with " << numDataTotal_64 - numDataAccumulated_64
+			                       << " rows remaining -- skipping the Jacobian dump for iteration "
+			                       << iterNum << " (the rest of the run is unaffected)." << std::endl;
+			fclose( fp );
+			ok = false;
+			break;
+		}
+
+		const long long int numDataThisFreq_64 = static_cast<long long int>(numDataThisFreq);
+		const size_t expected = static_cast<size_t>(numDataThisFreq) * static_cast<size_t>(numModel);
+		const size_t actual = fread( jacRowMajor + numDataAccumulated_64 * numModel_64,
+		                            sizeof(double), expected, fp );
+		const bool readFailed = ferror( fp ) != 0;
+		const int closeStatus = fclose( fp );
+		if( actual != expected || readFailed || closeStatus != 0 ){
+			OutputFiles::m_logFile << "# Warning: incomplete or failed sensitivity read in " << fileName.str()
+			                       << " (" << actual << " of " << expected << " values)"
+			                       << " -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+			ok = false;
+			break;
+		}
+
+		numDataAccumulated_64 += numDataThisFreq_64;
+	}
+
+	if( ok && numDataAccumulated_64 != numDataTotal_64 ){
+		OutputFiles::m_logFile << "# Warning: assembled Jacobian has " << numDataAccumulated_64
+		                       << " data rows but " << numDataTotal_64 << " were expected"
+		                       << " -- skipping the Jacobian dump for iteration " << iterNum
+		                       << " (the rest of the run is unaffected)." << std::endl;
+		ok = false;
+	}
+
+	if( ok ){
+		outputJacobianToHDF5( iterNum, numDataTotal, numModel, jacRowMajor, errVecTotal );
+	} else {
+		OutputFiles::m_logFile << "# Warning: no new exchange.h5 was written; any existing file is from an earlier export. Inversion continues." << std::endl;
+	}
+
+	delete [] jacRowMajor;
+	delete [] errVecTotal;
+}
+#endif // _HDF5_JAC
 
 // Get damping factor for resistivity value
 double Inversion::alphawithmaxcurvature() const {

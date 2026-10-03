@@ -40,7 +40,7 @@ public:
 	virtual ~InversionGaussNewtonModelSpace();
 
 	// Perform inversion
-	virtual void inversionCalculation();
+	virtual void inversionCalculation( const bool writeJacobianHDF5 = false );
 
 private:
 	// Copy constructer

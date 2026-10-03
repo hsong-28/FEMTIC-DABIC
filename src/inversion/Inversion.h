@@ -1,8 +1,11 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -76,8 +79,53 @@ public:
 	// Output scalar sensitivity values to binary file
 	void outputSensitivityScalarValuesToBinary( const int interNum ) const;
 
+	// Perform MPI_Allreduce and return globally-summed sensitivity values.
+	// Caller is responsible for deleting the returned array.
+	// Ported from femtic_v4_src, 2026-08-21. Made unconditional (no longer
+	// requires _HDF5_OUT) 2026-09-14, since
+	// ResistivityBlock::outputSensitivityBlock() also uses it
+	// unconditionally -- see Inversion.cpp and AnalysisControl.cpp.
+	double* getSensitivityScalarValuesReduced() const;
+
+#ifdef _HDF5_JAC
+	// Assemble the full dense Jacobian for iterNum from the out-of-core
+	// per-frequency sensitivity-matrix files (sensMatFreq<N>, written by
+	// calculateSensitivityMatrix() whenever doesCalculateSensitivity(iter)
+	// is true) together with the per-datum error/SD vector, and write
+	// jacobian.h5. This is the single, shared implementation used by:
+	//   - InversionGaussNewtonModelSpace/DataSpace::inversionCalculation(),
+	//     when called with writeJacobianHDF5=true for the deterministic
+	//     last iteration at which the Jacobian is computed without early
+	//     convergence (iter == m_iterationNumMax - 1);
+	//   - AnalysisControl::run(), directly, when the inversion converges
+	//     *before* that scheduled iteration -- inversionCalculation() is
+	//     never called for the iteration at which convergence is detected
+	//     (a converged model needs no further update), so the Jacobian
+	//     output that lives inside it never ran on early convergence.
+	//     Fixed 2026-09-11 (ported from femtic_v4_src); previously this
+	//     case only printed a log note advising a rerun with a smaller
+	//     ITERATION_NUM_MAX.
+	// COLLECTIVE: must be called by every PE (it performs MPI_Allgather
+	// and MPI_Gatherv internally); only PE 0 actually reads the
+	// out-of-core files and writes jacobian.h5.
+	void assembleAndWriteJacobianToHDF5( const int iterNum ) const;
+#endif // _HDF5_JAC
+
 	// Perform inversion
-	virtual void inversionCalculation() = 0;
+	// writeJacobianHDF5: when true and _HDF5_JAC is enabled, dump the full
+	// dense Jacobian for this iteration to jacobian.h5 (fixed filename,
+	// overwritten each time). Callers should only pass true for the last
+	// iteration at which the Jacobian is computed, since Femtic Jacobians
+	// can be very large; see AnalysisControl::run() for how this is
+	// determined. Default false so existing callers/overrides are unaffected.
+	// Note: InversionGaussNewtonDataSpace/ModelSpace (TO_Fixed) and the
+	// OCCAM/L-curve/ABIC trade-off-parameter-search variants (via
+	// AnalysisControlOCCAMLineSearch.cpp / AnalysisControl.cpp) all act on
+	// this flag; each of the latter's many trial inversionCalculation()
+	// calls per outer iteration shares the same flag, so during the final
+	// outer iteration jacobian.h5 is (harmlessly) overwritten by each trial
+	// in turn and ends up holding the last one evaluated.
+	virtual void inversionCalculation( const bool writeJacobianHDF5 = false ) = 0;
 
 	// Delete out-of-core file all
 	void deleteOutOfCoreFileAll();

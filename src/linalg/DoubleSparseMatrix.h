@@ -70,6 +70,12 @@ public:
 	// Get number of rows
 	int getNumRows() const;
 
+#ifdef _HDF5_JAC
+	// Get total number of non-zero entries (CRS format) (ported from femtic_v4_src, 2026-08-21)
+	int getNumNonZeros() const;
+
+#endif // _HDF5_JAC
+
 	// Get number of columns
 	int getNumColumns() const;
 

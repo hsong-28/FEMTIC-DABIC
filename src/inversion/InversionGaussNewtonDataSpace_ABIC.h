@@ -1,8 +1,11 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,7 +50,7 @@ public:
 	virtual ~InversionGaussNewtonDataSpace_ABIC();
 
 	// Perform inversion
-	virtual void inversionCalculation();
+	virtual void inversionCalculation( const bool writeJacobianHDF5 = false );
 
 	// Read sensitivity matrix
 	void readSensitivityMatrix( const std::string& fileName, int& numData, int& numModel, double*& sensitivityMatrix ) const;

@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-08-05 to 2026-10-01).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -27,6 +31,7 @@
 #include "MeshDataNonConformingHexaElement.h"
 #include "OutputFiles.h"
 #include "ObservedData.h"
+#include "InputFileMap.h"
 #ifdef _ANISOTOROPY
 #include "Util.h"
 #endif
@@ -34,6 +39,7 @@
 #include <string.h>
 #include <assert.h>
 #include <cmath>
+#include <cerrno>
 #include <iomanip>
 #include <sstream>
 #include <vector>
@@ -273,17 +279,23 @@ void ResistivityBlock::inputResisitivityBlock()
 	const int iterInit = (AnalysisControl::getInstance())->getIterationNumInit();
 	std::ostringstream inputFile;
 	inputFile << "resistivity_block_iter" << iterInit << ".dat";
-	std::ifstream inFile(inputFile.str().c_str(), std::ios::in);
+#ifdef _INPUT_FILE_MAP
+	const std::string resistivityBlockFileName = InputFileMap::resolve("initial", inputFile.str());
+#else
+	const std::string resistivityBlockFileName = InputFileMap::findOnDisk(inputFile.str());
+#endif
+	std::ifstream inFile(resistivityBlockFileName.c_str(), std::ios::in);
 
 	if (inFile.fail())
 	{
-		OutputFiles::m_logFile << "File open error : " << inputFile.str().c_str() << " !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << resistivityBlockFileName << " !!" << std::endl;
 		exit(1);
 	}
 
 	std::ostringstream inputRef;
 	inputRef << "referencemodel" << ".dat";
-	std::ifstream inFileRef(inputRef.str().c_str(), std::ios::in);
+	const std::string referenceModelFileName = InputFileMap::findOnDisk(inputRef.str());
+	std::ifstream inFileRef(referenceModelFileName.c_str(), std::ios::in);
 
 	int nElem(0);
 	inFile >> nElem;
@@ -715,12 +727,17 @@ void ResistivityBlock::inputReferenceModel()
 {
 
 	std::ostringstream inputFile;
-	inputFile << "Referencemodel.dat";
-	std::ifstream inFile(inputFile.str().c_str(), std::ios::in);
+	inputFile << "referencemodel.dat";
+#ifdef _INPUT_FILE_MAP
+	const std::string referenceModelFileName = InputFileMap::resolve("referencemodel", inputFile.str());
+#else
+	const std::string referenceModelFileName = InputFileMap::findOnDisk(inputFile.str());
+#endif
+	std::ifstream inFile(referenceModelFileName.c_str(), std::ios::in);
 
 	if (inFile.fail())
 	{
-		OutputFiles::m_logFile << "File open error : " << inputFile.str().c_str() << " !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << referenceModelFileName << " !!" << std::endl;
 		exit(1);
 	}
 	int nElem(0);
@@ -911,6 +928,37 @@ int ResistivityBlock::getNumResistivityBlockTotal() const
 {
 	return m_numResistivityBlockTotal;
 }
+
+#ifdef _HDF5_OUT
+// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+double ResistivityBlock::getResistivityValuesMinFromBlockID(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return m_resistivityValuesMin[iblk];
+}
+
+double ResistivityBlock::getResistivityValuesMaxFromBlockID(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return m_resistivityValuesMax[iblk];
+}
+
+double ResistivityBlock::getWeightingConstantFromBlockID(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return m_weightingConstants[iblk];
+}
+
+int ResistivityBlock::getTypeOfResistivityBlockHDF5(const int iblk) const {
+	assert(iblk >= 0 && iblk < m_numResistivityBlockTotal);
+	return getTypeOfResistivityBlock(m_fixResistivityValues[iblk], m_isolated[iblk]);
+}
+
+#endif // _HDF5_OUT
+
+#ifdef _HDF5_JAC
+// Read-only access to the roughening matrix (CRS format), for exchange.h5.
+const RougheningSquareMatrix& ResistivityBlock::getRougheningMatrix() const {
+	return m_rougheningMatrix;
+}
+#endif // _HDF5_JAC
 
 // Get number of resistivity blocks whose resistivity values are fixed
 int ResistivityBlock::getNumResistivityBlockNotFixed() const
@@ -2010,6 +2058,81 @@ void ResistivityBlock::outputResisitivityBlock(const int iterNum) const
 	}
 
 	fclose(fp);
+}
+
+// Output the two per-block sensitivity values (raw and volume-normalised)
+// to sensitivity_iterN.dat and sensitivity_normalized_iterN.dat, in the
+// same file structure as outputResisitivityBlock() above (element/block
+// counts, element->block map, one line per block) but as two standalone
+// files -- resistivity_block_iterN.dat itself is unaffected. Values are
+// computed exactly as in OutputHDF5.cpp's writeModelGroup()
+// (results_iterN.h5's /model/sensitivity/raw and .../volume_normalised),
+// using the same 1.0e-20 sentinel for fixed blocks; unlike the resistivity
+// value slot the min/max/weight columns don't apply here, so they are
+// written as 0.0.
+void ResistivityBlock::outputSensitivityBlock( const int iterNum, const double* sensitivityScalarValuesReduced ) const
+{
+
+	const double criteria = 1.0e-20;
+	std::vector<double> sensRaw( m_numResistivityBlockTotal, criteria );
+	std::vector<double> sensVol( m_numResistivityBlockTotal, criteria );
+	for( int iblk = 0; iblk < m_numResistivityBlockTotal; ++iblk ){
+		if( isFixedResistivityValue( iblk ) ) continue;
+		const int    imdl = getModelIDFromBlockID( iblk );
+		const double raw  = std::fabs( sensitivityScalarValuesReduced[imdl] );
+		const double vol  = calcVolumeOfBlock( iblk );
+		sensRaw[iblk] = (raw > criteria) ? raw : criteria;
+		sensVol[iblk] = (raw > criteria) ? raw / vol : criteria;
+	}
+
+	const int numElemTotal = ( ( AnalysisControl::getInstance() )->getPointerOfMeshData() )->getNumElemTotal();
+
+	struct FileSpec { const char* prefix; const std::vector<double>* values; };
+	const FileSpec specs[2] = {
+		{ "sensitivity_iter",            &sensRaw },
+		{ "sensitivity_normalized_iter", &sensVol },
+	};
+
+	for( int ifile = 0; ifile < 2; ++ifile ){
+		std::ostringstream fileName;
+		fileName << specs[ifile].prefix << iterNum << ".dat";
+
+		// Publish only a complete optional export, preserving any previous file.
+		const std::string temporary = fileName.str() + ".tmp";
+		const char* failure = NULL;
+		int savedErrno = 0;
+		auto failed = [&]( const char* stage ) {
+			if( failure == NULL ) { failure = stage; savedErrno = errno; }
+		};
+		FILE* fp = fopen( temporary.c_str(), "wx" );
+		const bool created = fp != NULL;
+		if( !created ) {
+			failed("create");
+		} else {
+			if( fprintf(fp, "%10d%10d\n", numElemTotal, m_numResistivityBlockTotal ) < 0 ) failed("write");
+			for( int iElem = 0; iElem < numElemTotal && failure == NULL; ++iElem ){
+				if( fprintf(fp, "%10d%10d\n", iElem, m_elementID2blockID[iElem] ) < 0 ) failed("write");
+			}
+			const std::vector<double>& values = *specs[ifile].values;
+			for( int iBlk = 0; iBlk < m_numResistivityBlockTotal && failure == NULL; ++iBlk ){
+				if( fprintf(fp, "%10d%5s%15e%15e%15e%15e%10d\n", iBlk, "     ",
+					values[iBlk], 0.0, 0.0, 0.0,
+					getTypeOfResistivityBlock(m_fixResistivityValues[iBlk], m_isolated[iBlk]) ) < 0 ) failed("write");
+			}
+			if( ferror(fp) ) failed("write");
+			if( fflush(fp) != 0 ) failed("flush");
+			if( fclose(fp) != 0 ) failed("close");
+			if( failure == NULL && rename(temporary.c_str(), fileName.str().c_str()) != 0 ) failed("publish");
+		}
+		if( failure != NULL ) {
+			OutputFiles::m_logFile << "# Warning: skipping sensitivity export " << fileName.str()
+				<< " for iteration " << iterNum << " (" << failure << ": " << strerror(savedErrno)
+				<< "). Any existing final file is unchanged and may be stale; inversion continues." << std::endl;
+			if( created && remove(temporary.c_str()) != 0 )
+				OutputFiles::m_logFile << "# Warning: could not remove incomplete temporary file " << temporary << std::endl;
+		}
+	}
+
 }
 
 void ResistivityBlock::outputAppraisalResistivityBlock(

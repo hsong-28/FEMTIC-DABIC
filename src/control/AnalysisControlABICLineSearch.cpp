@@ -1,3 +1,10 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC ABIC line-search member definitions split from AnalysisControl.cpp.
  * This file is branch-specific and must preserve the existing trial-state side effects.

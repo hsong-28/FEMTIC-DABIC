@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
-// Copyright (c) 2026 Han Song
-// Modified from Copyright (c) 2021 Yoshiya Usui
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-14 to 2026-10-02).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -348,6 +352,13 @@ public:
 	// Get flag specifing whether output file for paraview is binary or ascii
 	bool writeBinaryFormat() const;
 
+	// Get flag specifing whether per-iteration csv/vtk diagnostic output
+	// files are suppressed (OFILE_TYPE == -1 in control.dat). Does NOT
+	// affect resistivity_block_iterX.dat, distortion_iterX.dat,
+	// sensitivity_iterX.dat/sensitivity_normalized_iterX.dat, or any other
+	// .dat/.h5 output.
+	bool suppressCsvVtkOutput() const;
+
 	// Get inversion method
 	int getInversionMethod() const;
 
@@ -402,6 +413,18 @@ public:
 	std::string getAppraisalInputSensitivityDirectory() const;
 	std::string getAppraisalOutputDirectory() const;
 	bool writeLegacyAppraisalDsdkFiles() const;
+
+	// Runtime HDF5 switches (2026-10-02), set by the control.dat keywords
+	// ACTIVATE_HDF5_RESULTS and ACTIVATE_HDF5_EXCHANGE (both default to off).
+	// true  => the corresponding file is written. A keyword can only turn a
+	//          feature on if the binary was built with the matching compile-time
+	//          support (HDF5_OUT=yes / HDF5_JAC=yes in Makefile_hdf5);
+	//          otherwise inputControlData() stops with an error, so these
+	//          getters never return true in a build without that support.
+	// Identical on every PE (every PE reads the same control.dat), which the
+	// collective MPI calls inside the gated blocks rely on.
+	bool isHDF5ResultsActive() const;
+	bool isHDF5ExchangeActive() const;
 
 	// Get pointer to the object of class Forward3D
 	Forward3D *getPointerOfForward3D() const;
@@ -503,6 +526,8 @@ private:
 		APP_PHS_OPTION,
 		OUTPUT_ROUGH_MATRIX,
 		DATA_SPACE_METHOD,
+		ACTIVATE_HDF5_RESULTS,  // 2026-10-02: runtime switch for results_iterX.h5
+		ACTIVATE_HDF5_EXCHANGE, // 2026-10-02: runtime switch for exchange.h5
 #ifdef _ANISOTOROPY
 		ANISOTROPY,
 #endif
@@ -745,6 +770,11 @@ private:
 	// Flag specifing whether output file for paraview is binary or ascii
 	bool m_binaryOutput;
 
+	// Flag specifing whether per-iteration csv/vtk diagnostic output is
+	// suppressed (OFILE_TYPE == -1 in control.dat). See
+	// suppressCsvVtkOutput() above.
+	bool m_suppressCsvVtkOutput;
+
 	// Type of galvanic distortion
 	int m_typeOfDistortion;
 
@@ -827,6 +857,11 @@ private:
 	std::string m_appraisalInputSensitivityDirectory;
 	std::string m_appraisalOutputDirectory;
 	bool m_writeLegacyAppraisalDsdkFiles;
+
+	// Runtime HDF5 switches (see isHDF5ResultsActive()/isHDF5ExchangeActive()).
+	// (default member initializers: off unless the keyword is present)
+	bool m_activateHDF5Results = false;
+	bool m_activateHDF5Exchange = false;
 
 	// Terminate the inversion loop if nonlinear L-curve diagnostics cannot select an alpha
 	bool m_stopAfterNonlinearLCurveDiagnostics;

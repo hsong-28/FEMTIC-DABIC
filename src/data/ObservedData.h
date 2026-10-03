@@ -40,6 +40,7 @@
 #include "Forward3D.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Class of observed data
 class ObservedData{
@@ -151,6 +152,50 @@ public:
 
 	// Get total number of the distortion parameters whose value is not fixed
 	int getNumDistortionParamsNotFixed() const;
+
+#ifdef _HDF5_JAC
+	// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+	// Collect data-error (SD) vector in same slot order as residual vector
+	void collectErrorVectorOfDataThisPE( double* const vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+	int getNumStationsMT() const { return m_numStationsMT; }
+	int getNumStationsApparentResistivityAndPhase() const { return m_numStationsApparentResistivityAndPhase; }
+	int getNumStationsHTF() const { return m_numStationsHTF; }
+	int getNumStationsVTF() const { return m_numStationsVTF; }
+	int getNumStationsPT()  const { return m_numStationsPT;  }
+	int getNumStationsNMT() const { return m_numStationsNMT; }
+	int getNumStationsNMT2() const { return m_numStationsNMT2; }
+	int getNumStationsNMT2ApparentResistivityAndPhase() const { return m_numStationsNMT2ApparentResistivityAndPhase; }
+
+	const ObservedDataStationMT& getStationMT(const int i) const { return m_observedStationMT[i]; }
+	const ObservedDataStationApparentResistivityAndPhase& getStationApparentResistivityAndPhase(const int i) const { return m_observedStationApparentResistivityAndPhase[i]; }
+	const ObservedDataStationHTF& getStationHTF(const int i) const { return m_observedStationHTF[i]; }
+	const ObservedDataStationVTF& getStationVTF(const int i) const { return m_observedStationVTF[i]; }
+	const ObservedDataStationPT&  getStationPT (const int i) const { return m_observedStationPT[i];  }
+	const ObservedDataStationNMT& getStationNMT(const int i) const { return m_observedStationNMT[i]; }
+	const ObservedDataStationNMT2& getStationNMT2(const int i) const { return m_observedStationNMT2[i]; }
+	const ObservedDataStationNMT2ApparentResistivityAndPhase& getStationNMT2ApparentResistivityAndPhase(const int i) const { return m_observedStationNMT2ApparentResistivityAndPhase[i]; }
+
+	// --- results_iterN.h5 support (added 2026-09-13) ---
+	// Collect this PE's calculated response values across every station
+	// type, for the frequencies this PE actually computed. Called on EVERY
+	// PE (not just PE 0) -- see the MPI_Gatherv in AnalysisControl.cpp that
+	// merges these onto PE 0 before results_iterN.h5's /data group is
+	// written, and FemticHDF5CalcTypes.h for why this has no HDF5/MPI
+	// dependency of its own.
+	void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+	// Collect the same distortion-parameter values written by
+	// outputDistortionParams() (distortion_iterN.dat) into POD rows, so
+	// OutputHDF5.cpp can also embed them in results_iterN.h5's /distortion
+	// group. PE-0-only, like outputDistortionParams() itself -- no MPI
+	// involved, unlike collectCalculatedValuesForHDF5() above.
+	void collectDistortionParamsForHDF5( std::vector<FemticHDF5DistortionRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	// Get types of distortion parameters whose value is not fixed
 	int getTypesOfDistortionParamsNotFixed( const int iParamsNotFixed ) const;

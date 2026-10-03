@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-13).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -32,6 +33,7 @@
 #include "Forward3D.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of NMT station ( triangle area )
 class ObservedDataStationNMT2: public ObservedDataStation{
@@ -87,6 +89,35 @@ class ObservedDataStationNMT2: public ObservedDataStation{
 
 		// Get Z coordinate of the point
 		double getZCoordOfPoint( const int iDipole , const int num ) const;
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		std::complex<double> getNMT2ZxxObserved(const int i) const { return m_ZxxObserved[i]; }
+		std::complex<double> getNMT2ZxyObserved(const int i) const { return m_ZxyObserved[i]; }
+		std::complex<double> getNMT2ZyxObserved(const int i) const { return m_ZyxObserved[i]; }
+		std::complex<double> getNMT2ZyyObserved(const int i) const { return m_ZyyObserved[i]; }
+		double getNMT2ZxxSDRe(const int i) const { return m_ZxxSD[i].realPart; }
+		double getNMT2ZxxSDIm(const int i) const { return m_ZxxSD[i].imagPart; }
+		double getNMT2ZxySDRe(const int i) const { return m_ZxySD[i].realPart; }
+		double getNMT2ZxySDIm(const int i) const { return m_ZxySD[i].imagPart; }
+		double getNMT2ZyxSDRe(const int i) const { return m_ZyxSD[i].realPart; }
+		double getNMT2ZyxSDIm(const int i) const { return m_ZyxSD[i].imagPart; }
+		double getNMT2ZyySDRe(const int i) const { return m_ZyySD[i].realPart; }
+		double getNMT2ZyySDIm(const int i) const { return m_ZyySD[i].imagPart; }
+
+		// Collect this PE's calculated Impedance-tensor values for
+		// results_iterN.h5. Component order 0=Zxx 1=Zxy 2=Zyx 3=Zyy,
+		// matching OutputHDF5.cpp's /data row layout.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	protected:
 		enum ImpedanceTensorComponentNMT2{

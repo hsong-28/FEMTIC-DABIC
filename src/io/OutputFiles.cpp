@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-14).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -55,6 +59,18 @@ OutputFiles *OutputFiles::getInstance()
 void OutputFiles::openVTKFile(const int iterNum)
 {
 
+	if ((AnalysisControl::getInstance())->suppressCsvVtkOutput())
+	{
+		// OFILE_TYPE == -1: skip opening the per-iteration forward vtk file
+		// (and the mesh data dump below that would otherwise immediately
+		// follow) -- leaving m_vtkFile closed makes every downstream
+		// writer that checks m_vtkFile.is_open() (and even those that
+		// don't: writing to a closed std::ofstream is a well-defined,
+		// silent no-op, never a crash) safely produce nothing, with no
+		// changes needed anywhere else.
+		return;
+	}
+
 	if (m_vtkFile.is_open())
 	{
 		m_vtkFile.close();
@@ -85,6 +101,13 @@ void OutputFiles::openVTKFile(const int iterNum)
 // Open VTK file for ploting observed station
 void OutputFiles::openVTKFileForObservedStation()
 {
+
+	if ((AnalysisControl::getInstance())->suppressCsvVtkOutput())
+	{
+		// OFILE_TYPE == -1: skip opening the observed-station-locations vtk
+		// file -- see the matching comment in openVTKFile() above.
+		return;
+	}
 
 	if (m_vtkFileForObservedStation.is_open())
 	{
@@ -134,7 +157,17 @@ void OutputFiles::openCsvFileFor2DFwd(const int iterNum)
 	//	exit(1);
 	// }
 
-	if ((m_csvFileFor2DFwd = fopen(fileName.c_str(), "w")) == NULL)
+	// OFILE_TYPE == -1: every caller that writes into m_csvFileFor2DFwd does
+	// so with an unconditional fprintf() and no NULL check (unlike the
+	// vtk-file writers, which mostly check is_open() and are safe either
+	// way -- see openVTKFile() above), so simply never fopen()'ing the real
+	// file is not an option here: it would leave m_csvFileFor2DFwd NULL and
+	// crash the first fprintf(). Redirecting to the null device instead
+	// keeps every one of those call sites completely unchanged and safe.
+	const std::string target = (AnalysisControl::getInstance())->suppressCsvVtkOutput()
+	                            ? "/dev/null" : fileName;
+
+	if ((m_csvFileFor2DFwd = fopen(target.c_str(), "w")) == NULL)
 	{
 		m_logFile << "File open error !! : " << fileName << std::endl;
 		exit(1);
@@ -164,7 +197,16 @@ void OutputFiles::openCsvFileFor3DFwd(const int iterNum)
 	//	exit(1);
 	// }
 
-	if ((m_csvFile = fopen(filename.c_str(), "w")) == NULL)
+	// OFILE_TYPE == -1: see the matching comment in openCsvFileFor2DFwd()
+	// above -- every one of the many outputCalculatedValues() writers
+	// (all 8 station classes, plus AdditionalOutputPoint.cpp) fprintf()s
+	// into m_csvFile unconditionally, so it must stay a valid, non-NULL
+	// FILE* even when suppressed; redirecting to the null device is the
+	// minimally-invasive way to do that.
+	const std::string target = (AnalysisControl::getInstance())->suppressCsvVtkOutput()
+	                            ? "/dev/null" : filename;
+
+	if ((m_csvFile = fopen(target.c_str(), "w")) == NULL)
 	{
 		m_logFile << "File open error !! : " << filename << std::endl;
 		exit(1);

@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-13).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -740,6 +741,30 @@ void ObservedDataStationMT::outputCalculatedValues() const{
 	}
 
 }
+
+#ifdef _HDF5_OUT
+// Collect this PE's calculated Impedance-tensor values for results_iterN.h5.
+void ObservedDataStationMT::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
+
+	int icount(0);
+	for( std::vector<int>::const_iterator itr = m_freqIDsAmongThisStationCalculatedByThisPE.begin(); itr != m_freqIDsAmongThisStationCalculatedByThisPE.end(); ++itr ){
+		const std::complex<double> cal[4] = {
+			m_ZxxCalculated[icount], m_ZxyCalculated[icount], m_ZyxCalculated[icount], m_ZyyCalculated[icount]
+		};
+		for( int c = 0; c < 4; ++c ){
+			FemticHDF5CalcRow r;
+			r.site_id   = m_stationID;
+			r.datatype  = FemticHDF5::DTYPE_MT;
+			r.freq      = m_freq[*itr];
+			r.component = c;
+			r.cal_re    = cal[c].real();
+			r.cal_im    = cal[c].imag();
+			rows.push_back(r);
+		}
+		++icount;
+	}
+}
+#endif // _HDF5_OUT
 
 // Calulate interpolator vector of electric field
 void ObservedDataStationMT::calcInterpolatorVectorOfElectricField( Forward3D* const ptrForward3D ){
@@ -1746,3 +1771,24 @@ double ObservedDataStationMT::getDistortionParamsUpdatedFull( const int iComp ) 
 	}
 
 }
+
+#ifdef _HDF5_JAC
+// Collect data-error (SD) vector in same slot order as residual vector
+// (ported from femtic_v4_src, 2026-08-21).
+void ObservedDataStationMT::collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const{
+
+	const int freqIDThisPEInSta = getFreqIDsAmongThisPE( freq );
+	if( freqIDThisPEInSta < 0 ) return;
+	const int freqIDGlobalInSta = m_freqIDsAmongThisStationCalculatedByThisPE[ freqIDThisPEInSta ];
+
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZxx[freqIDThisPEInSta].realPart, offset, m_ZxxSD[freqIDGlobalInSta].realPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZxx[freqIDThisPEInSta].imagPart, offset, m_ZxxSD[freqIDGlobalInSta].imagPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZxy[freqIDThisPEInSta].realPart, offset, m_ZxySD[freqIDGlobalInSta].realPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZxy[freqIDThisPEInSta].imagPart, offset, m_ZxySD[freqIDGlobalInSta].imagPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZyx[freqIDThisPEInSta].realPart, offset, m_ZyxSD[freqIDGlobalInSta].realPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZyx[freqIDThisPEInSta].imagPart, offset, m_ZyxSD[freqIDGlobalInSta].imagPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZyy[freqIDThisPEInSta].realPart, offset, m_ZyySD[freqIDGlobalInSta].realPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfZyy[freqIDThisPEInSta].imagPart, offset, m_ZyySD[freqIDGlobalInSta].imagPart, vector );
+}
+
+#endif // _HDF5_JAC

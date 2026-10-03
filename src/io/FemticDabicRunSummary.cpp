@@ -2,9 +2,12 @@
 // The MIT License (MIT)
 //
 // Copyright (c) 2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-27 to 2026-10-01).
 // SPDX-License-Identifier: MIT
 //
 // Run-summary helpers for FEMTIC-DABIC screen and log output.
+//
 //-------------------------------------------------------------------------------------------------------
 #include "FemticDabicRunSummary.h"
 
@@ -68,6 +71,12 @@ void outputMainOutputFiles(std::ostream& out){
 		<< ", " << CommonParameters::programName << "_iter<iter>.cnv"
 		<< ", result_<rank>_iter<iter>.csv"
 		<< ", " << FemticDabicFileNames::caseFile();
+#ifdef _HDF5_OUT
+	out << ", results_iter<iter>.h5";
+#endif
+#ifdef _HDF5_JAC
+	out << ", exchange.h5 (jacobian + rough + mesh; last scheduled iteration or on convergence)";
+#endif
 }
 
 }
@@ -150,7 +159,7 @@ void outputRunConfigurationLog(std::ostream& out, const RunConfigurationSummary&
 	out << "# Main input files : ";
 	outputMainInputFiles(out, summary.iterationNumInit);
 	out << "." << std::endl;
-	out << "# Conditional/runtime files : Referencemodel.dat, distortion_iter<iter>.dat, and sensMatFreq* files when their corresponding options are active." << std::endl;
+	out << "# Conditional/runtime files : referencemodel.dat, distortion_iter<iter>.dat, and sensMatFreq* files when their corresponding options are active." << std::endl;
 	out << "# Main output files : ";
 	outputMainOutputFiles(out);
 	out << "." << std::endl;

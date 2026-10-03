@@ -73,6 +73,12 @@ public:
 	// Get tolal number of nodes
 	int getNumNodeTotal() const;
 
+#if defined(_HDF5_OUT) || defined(_HDF5_JAC)
+	// Get number of nodes per element (ported from femtic_v4_src, 2026-08-21)
+	int getNumNodePerElement() const;
+
+#endif // _HDF5_OUT || _HDF5_JAC
+
 	// Get total number of elements belonging to the boundary planes
 	int getNumElemOnBoundaryPlanes( const int iPlane ) const;
 

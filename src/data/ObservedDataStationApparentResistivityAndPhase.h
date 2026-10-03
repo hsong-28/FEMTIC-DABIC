@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-13).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -31,6 +32,7 @@
 #include "ObservedDataStationMT.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of apparent resistivity and phase station
 class ObservedDataStationApparentResistivityAndPhase: public ObservedDataStationMT{
@@ -72,6 +74,39 @@ class ObservedDataStationApparentResistivityAndPhase: public ObservedDataStation
 
 		// Apparent resistivity is ignored for all frequencies
 		bool isApparentResistivityIgnoredForAllFrequencies( const int iComp ) const;
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		double getApparentResistivityXXObserved(const int i) const { return m_apparentResistivityXXObserved[i]; }
+		double getApparentResistivityXYObserved(const int i) const { return m_apparentResistivityXYObserved[i]; }
+		double getApparentResistivityYXObserved(const int i) const { return m_apparentResistivityYXObserved[i]; }
+		double getApparentResistivityYYObserved(const int i) const { return m_apparentResistivityYYObserved[i]; }
+		double getPhaseXXObserved(const int i) const { return m_PhaseXXObserved[i]; }
+		double getPhaseXYObserved(const int i) const { return m_PhaseXYObserved[i]; }
+		double getPhaseYXObserved(const int i) const { return m_PhaseYXObserved[i]; }
+		double getPhaseYYObserved(const int i) const { return m_PhaseYYObserved[i]; }
+		double getApparentResistivityXXSD(const int i) const { return m_apparentResistivityXXSD[i]; }
+		double getApparentResistivityXYSD(const int i) const { return m_apparentResistivityXYSD[i]; }
+		double getApparentResistivityYXSD(const int i) const { return m_apparentResistivityYXSD[i]; }
+		double getApparentResistivityYYSD(const int i) const { return m_apparentResistivityYYSD[i]; }
+		double getPhaseXXSD(const int i) const { return m_PhaseXXSD[i]; }
+		double getPhaseXYSD(const int i) const { return m_PhaseXYSD[i]; }
+		double getPhaseYXSD(const int i) const { return m_PhaseYXSD[i]; }
+		double getPhaseYYSD(const int i) const { return m_PhaseYYSD[i]; }
+
+		// Collect this PE's calculated apparent-resistivity/phase values for
+		// results_iterN.h5. Component order 0-3=rhoXX,XY,YX,YY, 4-7=phsXX,
+		// XY,YX,YY, matching OutputHDF5.cpp's /data row layout.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	private:
 

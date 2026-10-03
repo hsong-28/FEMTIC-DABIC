@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-13).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -32,6 +33,7 @@
 #include "Forward3D.h"
 #include "CommonParameters.h"
 #include "MeshDataTetraElement.h"
+#include "FemticHDF5CalcTypes.h"
 
 // Observed data of NMT station ( line )
 class ObservedDataStationNMT: public ObservedDataStation{
@@ -87,6 +89,30 @@ class ObservedDataStationNMT: public ObservedDataStation{
 
 		// Get Z coordinate of the point
 		double getZCoordOfPoint( const int num ) const;
+
+#ifdef _HDF5_JAC
+		// Collect data-error (SD) vector in same slot order as residual vector
+		// (ported from femtic_v4_src, 2026-08-21).
+		void collectErrorVectorThisPE( const double freq, const int offset, double* vector ) const;
+
+#endif // _HDF5_JAC
+
+#ifdef _HDF5_OUT
+		// --- HDF5 output accessors (ported from femtic_v4_src, 2026-08-21) ---
+		// Note: getLocationOfStation() already declared above (non-inline).
+		std::complex<double> getYxObserved(const int i) const { return m_YxObserved[i]; }
+		std::complex<double> getYyObserved(const int i) const { return m_YyObserved[i]; }
+		double getYxSDRe(const int i) const { return m_YxSD[i].realPart; }
+		double getYxSDIm(const int i) const { return m_YxSD[i].imagPart; }
+		double getYySDRe(const int i) const { return m_YySD[i].realPart; }
+		double getYySDIm(const int i) const { return m_YySD[i].imagPart; }
+
+		// Collect this PE's calculated NMT response values for
+		// results_iterN.h5. Component order 0=Yx 1=Yy, matching
+		// OutputHDF5.cpp's /data row layout.
+		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
+
+#endif // _HDF5_OUT
 
 	private:
 		// Location of the station

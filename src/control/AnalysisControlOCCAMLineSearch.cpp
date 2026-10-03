@@ -1,3 +1,10 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC OCCAM line-search member definitions split from AnalysisControl.cpp.
  * This file restores the legacy v1.0 OCCAM search helpers and the minimal
@@ -18,6 +25,19 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 	const int myProcessID = getMyPE();
 	ObservedData *const ptrObservedData = ObservedData::getInstance();
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
+
+	// Femtic Jacobians can be very large, so the optional HDF5 Jacobian
+	// dump (jacobian.h5, guarded by _HDF5_JAC) is only written once, for
+	// the last outer iteration at which it is computed (and only when
+	// ACTIVATE_HDF5_EXCHANGE is set in control.dat, 2026-10-02) -- see the matching
+	// comment in AnalysisControl::run() for why iter == m_iterationNumMax-1
+	// is the right deterministic condition. This OCCAM line search tries
+	// many trade-off-parameter candidates per outer iteration, each calling
+	// inversionCalculation() below; all of them share this same flag, so
+	// during the final outer iteration jacobian.h5 gets (harmlessly)
+	// overwritten by each candidate in turn and ends up holding the last
+	// one evaluated (2026-08-30).
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	if (myProcessID == 0)
 	{
@@ -106,7 +126,7 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 			{
 				m_tradeOffParameterOCCub = m_tradeOffParameterOCCub + 0.30103;
 				m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCub);
-				m_ptrInversion->inversionCalculation();
+				m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 				m_rmsOCCub = m_ptrInversion->getrms();
 			}
 			if (myProcessID == 0)
@@ -134,7 +154,7 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 		{
 			std::cout << " # OCCAM Phase II: Searching for the smoothest model that meets the tolerance" << std::endl;
 		}
-		m_ptrInversion->inversionCalculation();
+		m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 		m_rmsOCClb = m_ptrInversion->getrms();
 		m_tradeOffParameterOCClb = log10(m_tradeOffParameterForResistivityValue);
 		if (m_rmsOCClb < m_tolreq)
@@ -152,7 +172,7 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 			{
 				m_tradeOffParameterOCCub = m_tradeOffParameterOCCub + 0.30103;
 				m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCub);
-				m_ptrInversion->inversionCalculation();
+				m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 				m_rmsOCCub = m_ptrInversion->getrms();
 			}
 			if (myProcessID == 0)
@@ -174,7 +194,7 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 		{
 			m_tradeOffParameterOCClb = m_tradeOffParameterOCClb + 0.30103;
 			m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCClb);
-			m_ptrInversion->inversionCalculation();
+			m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			m_rmsOCClb = m_ptrInversion->getrms();
 			if (m_rmsOCClb >= m_tolreq)
 			{
@@ -193,7 +213,7 @@ void AnalysisControl::runOCCAMLineSearch(const char* regularizationLabel)
 				{
 					m_tradeOffParameterOCCub = m_tradeOffParameterOCCub + 0.30103;
 					m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCub);
-					m_ptrInversion->inversionCalculation();
+					m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 					m_rmsOCCub = m_ptrInversion->getrms();
 				}
 				if (myProcessID == 0)
@@ -231,15 +251,17 @@ void AnalysisControl::minbrkOCC()
 	const double gold = sqrt(1.618034);
 	ResistivityBlock *const ptrResistivityBlock = ResistivityBlock::getInstance();
 	ObservedData *const ptrObservedData = ObservedData::getInstance();
+	// See the matching comment in runOCCAMLineSearch() above / AnalysisControl::run().
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCB);
-	m_ptrInversion->inversionCalculation();
+	m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 	ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
 	ptrObservedData->copyDistortionParamsCurToPWK1();
 	m_rmsOCCB = m_ptrInversion->getrms();
 
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCA);
-	m_ptrInversion->inversionCalculation();
+	m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 	m_rmsOCCA = m_ptrInversion->getrms();
 
 	if (m_rmsOCCB > m_rmsOCCA)
@@ -256,7 +278,7 @@ void AnalysisControl::minbrkOCC()
 
 	m_tradeOffParameterOCCC = m_tradeOffParameterOCCB + gold * (m_tradeOffParameterOCCB - m_tradeOffParameterOCCA);
 	m_tradeOffParameterForResistivityValue = pow(10.0, m_tradeOffParameterOCCC);
-	m_ptrInversion->inversionCalculation();
+	m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 	m_rmsOCCC = m_ptrInversion->getrms();
 
 	while (m_rmsOCCB > m_rmsOCCC)
@@ -275,7 +297,7 @@ void AnalysisControl::minbrkOCC()
 		if ((m_tradeOffParameterOCCB - U) * (U - m_tradeOffParameterOCCC) > 0)
 		{
 			m_tradeOffParameterForResistivityValue = pow(10.0, U);
-			m_ptrInversion->inversionCalculation();
+			m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			rmsOCCU = m_ptrInversion->getrms();
 			if (rmsOCCU < m_rmsOCCC)
 			{
@@ -295,13 +317,13 @@ void AnalysisControl::minbrkOCC()
 			}
 			U = m_tradeOffParameterOCCC + gold * (m_tradeOffParameterOCCC - m_tradeOffParameterOCCB);
 			m_tradeOffParameterForResistivityValue = pow(10.0, U);
-			m_ptrInversion->inversionCalculation();
+			m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			rmsOCCU = m_ptrInversion->getrms();
 		}
 		else if ((m_tradeOffParameterOCCC - U) * (U - Ulim) > 0)
 		{
 			m_tradeOffParameterForResistivityValue = pow(10.0, U);
-			m_ptrInversion->inversionCalculation();
+			m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			rmsOCCU = m_ptrInversion->getrms();
 			if (rmsOCCU < m_rmsOCCC)
 			{
@@ -313,7 +335,7 @@ void AnalysisControl::minbrkOCC()
 				ptrResistivityBlock->copyResistivityValuesNotFixedToPWK1();
 				ptrObservedData->copyDistortionParamsCurToPWK1();
 				m_tradeOffParameterForResistivityValue = pow(10.0, U);
-				m_ptrInversion->inversionCalculation();
+				m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 				rmsOCCU = m_ptrInversion->getrms();
 			}
 		}
@@ -321,14 +343,14 @@ void AnalysisControl::minbrkOCC()
 		{
 			U = Ulim;
 			m_tradeOffParameterForResistivityValue = pow(10.0, U);
-			m_ptrInversion->inversionCalculation();
+			m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			rmsOCCU = m_ptrInversion->getrms();
 		}
 		else
 		{
 			U = m_tradeOffParameterOCCC + gold * (m_tradeOffParameterOCCC - m_tradeOffParameterOCCB);
 			m_tradeOffParameterForResistivityValue = pow(10.0, U);
-			m_ptrInversion->inversionCalculation();
+			m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 			rmsOCCU = m_ptrInversion->getrms();
 		}
 		m_tradeOffParameterOCCA = m_tradeOffParameterOCCB;
@@ -352,6 +374,8 @@ double AnalysisControl::frootOCC()
 	const int ITMAX = 100;
 	const double EPS = 3.E-8;
 	const double tol = 0.1;
+	// See the matching comment in runOCCAMLineSearch() above / AnalysisControl::run().
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	double aa = m_tradeOffParameterOCClb;
 	double b = m_tradeOffParameterOCCub;
@@ -467,7 +491,7 @@ double AnalysisControl::frootOCC()
 		}
 
 		m_tradeOffParameterForResistivityValue = pow(10.0, b);
-		m_ptrInversion->inversionCalculation();
+		m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 		fb = m_ptrInversion->getrms() - m_tolreq;
 		ptrResistivityBlock->copyResistivityValuesNotFixedToPWK2();
 		ptrObservedData->copyDistortionParamsCurToPWK2();
@@ -497,6 +521,8 @@ double AnalysisControl::fminbrentOCC()
 	const double CGOLD = 0.3819660;
 	const double ZEPS = 1.0E-10;
 	const double tol = 0.1;
+	// See the matching comment in runOCCAMLineSearch() above / AnalysisControl::run().
+	const bool writeJacobianHDF5ThisIter = ( isHDF5ExchangeActive() && m_iterationNumCurrent == m_iterationNumMax - 1 );
 
 	double lowerBound = std::min(m_tradeOffParameterOCCC, m_tradeOffParameterOCCA);
 	double upperBound = std::max(m_tradeOffParameterOCCC, m_tradeOffParameterOCCA);
@@ -576,7 +602,7 @@ double AnalysisControl::fminbrentOCC()
 
 		u = (std::abs(step) >= tol1) ? (x + step) : (x + std::copysign(tol1, step));
 		m_tradeOffParameterForResistivityValue = pow(10.0, u);
-		m_ptrInversion->inversionCalculation();
+		m_ptrInversion->inversionCalculation( writeJacobianHDF5ThisIter );
 		fu = m_ptrInversion->getrms();
 
 		if (fu <= fx)

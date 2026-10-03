@@ -6,7 +6,7 @@ inversion method is a data-space variant of Akaike's Bayesian Information
 Criterion (D-DABIC); OCCAM and nonlinear cubic-spline L-curve inversion are
 also supported, together with L2, L1-style, and L0-style regularization.
 
-Current release: **v2.7.0**.
+Current release: **v2.7.1**.
 
 ## Main Features
 
@@ -20,14 +20,15 @@ Current release: **v2.7.0**.
 - optional reference-model/minimum-norm constraints and galvanic distortion
   estimation;
 - optional Levenberg-Marquardt damping for stabilizing model updates;
-- model-resolution and covariance-diagonal appraisal.
+- model-resolution and covariance-diagonal appraisal;
+- optional HDF5 model, response, Jacobian, and roughening-matrix output.
 
 ## Documentation
 
-The complete installation, input, control-keyword, inversion-method, and output
-reference is available in:
+The base user manual and v2.7.1 additions are available in:
 
 - [FEMTIC-DABIC User Manual v2.7.0](docs/FEMTIC-DABIC_UserManual_v2.7.0.pdf)
+- [v2.7.1 HDF5 and workflow additions](src/README_hdf5.md)
 
 ## Build
 
@@ -46,6 +47,18 @@ The executable is generated as:
 ```text
 src/femtic-dabic
 ```
+
+`src/Makefile` is the only build entry point. HDF5 and input-file remapping
+are optional and disabled by default:
+
+```bash
+make HDF5_OUT=yes HDF5_JAC=yes
+make HDF5_OUT=yes HDF5_JAC=yes INPUT_FILE_MAP=yes
+```
+
+Both commands build `femtic-dabic_h5_results_exchange.x`. HDF5 builds require
+the HDF5 development library; writing files additionally requires the
+corresponding `control.dat` switches. See [HDF5 build and output options](src/README_hdf5.md).
 
 ## Minimal Run
 
@@ -114,40 +127,13 @@ included in the GitHub source release.
 
 ## Release Note
 
-***v2.7*** Aug. 3, 2026: Simplified the ABIC interface while preserving the
-bracket-only inexact workflow and same-alpha reduced-step retry.
+***v2.7.1*** Oct. 3, 2026: Integrated Volker Rath's HDF5 output
+and Python readers, optional input-file mapping, control-file enhancements,
+sensitivity exports, and signed model-resolution diagonal correction.
+Follow-up maintenance unifies the Makefile, validates control inputs, and
+checks optional exports while retaining the existing output formats.
 
-***v2.6*** Jul. 16, 2026: Implemented scalar negative-standard-deviation
-masking for raw MT and VTF real and imaginary data, so inactive observations no
-longer contribute to the residual, sensitivity matrix, RMS, or model update.
-
-***v2.5*** Jun. 27, 2026: Added production model-resolution and
-covariance-diagonal appraisal.
-
-***v2.3*** Jun. 23, 2026: Unified fixed-alpha, ABIC, OCCAM, linear
-cubic-spline L-curve, and nonlinear cubic-spline L-curve inversion under one
-maintained control and diagnostic framework.
-
-***v1.4*** Jan. 12, 2026: I've revised the D-DABIC workflow to ensure it is
-capable of incorporating the distortion correction functionality.
-
-***v1.3*** Sep. 13, 2025: Added Minimum Norm (MN) Stabilizer with Depth of
-Investigation (DOI) Support. Introduced a new regularization option
-(`|m - m_r|`) to constrain inversion toward a reference model (`m_r`); the
-primary purpose of this option (for now) is to enable DOI analysis for model
-appraisal.
-
-***v1.2*** Sep. 11, 2025: Reference Model (`m_r`) Configuration Option. Added
-support for defining a user-provided reference model (`m_r`), enabling
-physics-based constraints in the inversion.
-
-***v1.1*** Dec. 30, 2024: Laplacian Filter (LF) for Marginal Likelihood
-Maximization. Enabled the LF as an alternative regularization during the
-D-DABIC optimization.
-
-***v1.0*** Nov. 28, 2024: Core FEMTIC-DABIC Framework. Implemented a 3-D
-data-space inversion method using a data-space variant of Akaike's Bayesian
-Information Criterion (D-DABIC).
+For earlier changes, see the [CHANGELOG](CHANGELOG.md).
 
 ## Citation
 
@@ -191,6 +177,10 @@ FEMTIC-DABIC is distributed under the MIT License. See [LICENSE](LICENSE).
 
 - Original FEMTIC source: Copyright (c) 2021 Yoshiya Usui
 - FEMTIC-DABIC modifications: Copyright (c) 2025-2026 Han Song
+
+[Volker Rath](https://github.com/volkerrath) (DIAS) contributed the HDF5 and
+related workflow extensions described above. His original commits and
+file-level attribution are retained.
 
 Files derived from upstream FEMTIC retain the original attribution. External
 dependencies, including MPI and Intel oneAPI/MKL, are governed by their own

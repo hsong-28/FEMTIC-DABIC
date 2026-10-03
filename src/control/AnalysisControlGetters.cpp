@@ -1,3 +1,12 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-14 to 2026-10-02).
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC getter definitions split from AnalysisControl.cpp.
  * This file must not own parser, line-search, forward, or convergence behavior.
@@ -316,6 +325,13 @@ bool AnalysisControl::writeBinaryFormat() const
 	return m_binaryOutput;
 }
 
+// Get flag specifing whether per-iteration csv/vtk diagnostic output is
+// suppressed (OFILE_TYPE == -1). See the declaration in AnalysisControl.h.
+bool AnalysisControl::suppressCsvVtkOutput() const
+{
+	return m_suppressCsvVtkOutput;
+}
+
 int AnalysisControl::getDegreeOfLpMinimumNorm() const
 {
 	return m_degreeOfLpMinimumNorm;
@@ -449,4 +465,16 @@ std::string AnalysisControl::getAppraisalOutputDirectory() const
 bool AnalysisControl::writeLegacyAppraisalDsdkFiles() const
 {
 	return m_writeLegacyAppraisalDsdkFiles;
+}
+
+// Runtime HDF5 switches, set by ACTIVATE_HDF5_RESULTS / ACTIVATE_HDF5_EXCHANGE
+// in control.dat (2026-10-02). See AnalysisControl.h.
+bool AnalysisControl::isHDF5ResultsActive() const
+{
+	return m_activateHDF5Results;
+}
+
+bool AnalysisControl::isHDF5ExchangeActive() const
+{
+	return m_activateHDF5Exchange;
 }

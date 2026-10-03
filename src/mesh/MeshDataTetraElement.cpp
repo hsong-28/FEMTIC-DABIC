@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// File mapping by Volker Rath (DIAS; 2026-08-05).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -35,6 +36,7 @@
 #include "OutputFiles.h"
 #include "CommonParameters.h"
 #include "Util.h"
+#include "InputFileMap.h"
 
 const double MeshDataTetraElement::m_eps = 1.0e-12;
 
@@ -140,10 +142,15 @@ MeshDataTetraElement::~MeshDataTetraElement(){
 // Input mesh data from "mesh.dat"
 void MeshDataTetraElement::inputMeshData(){
 
-	std::ifstream inFile( "mesh.dat", std::ios::in );
+#ifdef _INPUT_FILE_MAP
+	const std::string meshFileName = InputFileMap::resolve("mesh", "mesh.dat");
+#else
+	const std::string meshFileName = InputFileMap::findOnDisk("mesh.dat");
+#endif
+	std::ifstream inFile( meshFileName.c_str(), std::ios::in );
 	if( inFile.fail() )
 	{
-		OutputFiles::m_logFile << "File open error : mesh.dat !!" << std::endl;
+		OutputFiles::m_logFile << "File open error : " << meshFileName << " !!" << std::endl;
 		exit(1);
 	}
 

@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// File mapping by Volker Rath (DIAS; 2026-08-05).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -36,6 +37,7 @@
 #include "CommonParameters.h"
 #include "ResistivityBlock.h"
 #include "OutputFiles.h"
+#include "InputFileMap.h"
 
 // Constructer
 MeshDataBrickElement::MeshDataBrickElement():
@@ -92,10 +94,15 @@ MeshDataBrickElement& MeshDataBrickElement::operator=(const MeshDataBrickElement
 // Input mesh data from "mesh.dat"
 void MeshDataBrickElement::inputMeshData(){
 
-	std::ifstream inFile( "mesh.dat", std::ios::in );
+#ifdef _INPUT_FILE_MAP
+	const std::string meshFileName = InputFileMap::resolve("mesh", "mesh.dat");
+#else
+	const std::string meshFileName = InputFileMap::findOnDisk("mesh.dat");
+#endif
+	std::ifstream inFile( meshFileName.c_str(), std::ios::in );
 	if( inFile.fail() )
 	{
-		std::cerr << "File open error : mesh.dat !!" << std::endl;
+		std::cerr << "File open error : " << meshFileName << " !!" << std::endl;
 		exit(1);
 	}
 
