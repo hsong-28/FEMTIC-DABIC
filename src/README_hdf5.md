@@ -1,6 +1,6 @@
 # FEMTIC-DABIC v2.7 — Modifications
 
-Published release notes are maintained in [README.md](../README.md#release-note).
+The complete release history is maintained in [CHANGELOG.md](../CHANGELOG.md).
 
 HDF5 and workflow extensions contributed by Volker Rath (DIAS).
 
