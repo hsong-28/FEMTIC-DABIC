@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// File mapping by Volker Rath (DIAS; 2026-08-05).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -21,7 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
-// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
 #include <stddef.h>
 #include <stdio.h>
 #include <iostream>

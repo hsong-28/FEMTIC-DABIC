@@ -2,18 +2,12 @@
 // The MIT License (MIT)
 //
 // Copyright (c) 2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-27 to 2026-10-01).
 // SPDX-License-Identifier: MIT
 //
 // Run-summary helpers for FEMTIC-DABIC screen and log output.
 //
-// Modified (added the HDF5 output files -- results_iter<iter>.h5,
-// jacobian.h5, rough.h5, mesh.h5 -- to the "Main output files" summary
-// line, each gated by its own compile-time _HDF5_* macro so only the
-// files actually produced by this build are listed) by Volker Rath (DIAS)
-// with the help of Claude Sonnet 5, 2026-09-27.
-// Further modified (jacobian.h5, rough.h5, mesh.h5 replaced by the single
-// exchange.h5) by Volker Rath (DIAS) with the help of Claude Sonnet 5.5
-// (Anthropic), 2026-10-01.
 //-------------------------------------------------------------------------------------------------------
 #include "FemticDabicRunSummary.h"
 

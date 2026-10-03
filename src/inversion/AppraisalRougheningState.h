@@ -1,8 +1,7 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
-// Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2026
+// Copyright (c) 2026 Han Song
 //-------------------------------------------------------------------------------------------------------
 #ifndef DBLDEF_APPRAISAL_ROUGHENING_STATE
 #define DBLDEF_APPRAISAL_ROUGHENING_STATE

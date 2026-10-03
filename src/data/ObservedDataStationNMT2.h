@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-13).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -114,8 +115,6 @@ class ObservedDataStationNMT2: public ObservedDataStation{
 		// Collect this PE's calculated Impedance-tensor values for
 		// results_iterN.h5. Component order 0=Zxx 1=Zxy 2=Zyx 3=Zyy,
 		// matching OutputHDF5.cpp's /data row layout.
-		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
-		// (Anthropic), 2026-09-13.
 		void collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const;
 
 #endif // _HDF5_OUT

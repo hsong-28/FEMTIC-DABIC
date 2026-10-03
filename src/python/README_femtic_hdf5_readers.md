@@ -9,8 +9,8 @@ difference is in v5 anisotropic runs, which add tensor columns to
 Requirements: `h5py` (mandatory) and `scipy` (optional; without it
 `read_rough_hdf5` returns the raw CSR arrays).
 
-AI-generated code (Claude, Anthropic, 2026-09-25). Review and test before
-production use.
+Contributed by Volker Rath (DIAS). Validate against representative solver
+outputs before production use.
 
 ---
 
@@ -25,8 +25,11 @@ production use.
 `/mesh`. It replaces the former `jacobian.h5`, `rough.h5` and `mesh.h5`
 (merged 2026-10-01; v2.7 tree so far).
 
-For the v2.7 OCCAM/ABIC/L-curve paths, the Jacobian in `exchange.h5` holds the last
-evaluated trade-off candidate, not necessarily the selected one.
+The Jacobian describes its recorded linearization iteration, not necessarily
+the final model. Check `/metadata` and `/jacobian/metadata` `iterNum` against
+the run log before pairing it with a results file. The scheduled final
+iteration is forward-only. Failed exports may leave an older valid file;
+file existence alone is not evidence of a current export.
 
 ---
 
@@ -84,17 +87,26 @@ results_iter10.h5           10        5       3    no        3      0    no
 - **blockID** runs over all nBlocks resistivity blocks, fixed ones
   included (air, sea, any other fixed region). It is used by
   `/model/blocks`, `/model/sensitivity/*` and `/model/element_block_map`.
-- **modelID** runs over the free blocks only (type 0 or 3), in ascending
-  blockID order, as assigned in `ResistivityBlock`. It is used by the
-  columns of `/jacobian` and by the rows and columns of `/rough` (both in `exchange.h5`).
+- In isotropic DABIC, **resistivity modelID** runs over free blocks (type 0
+  or 3) in ascending blockID order. These occupy the leading Jacobian columns;
+  estimated distortion parameters follow them and have no resistivity blockID.
+- **`/rough`** uses blockID on both axes and includes fixed blocks. It is
+  the pre-degeneration operator, not the solver's weighted free-parameter
+  operator. Fixed-block contributions, filter/IRLS weights, reference terms,
+  regularization weights and distortion penalties are separate. Do not form
+  `J.T @ J + R.T @ R` directly from these two raw exports.
 
-`FemticModel.model_to_block` gives the blockID of each modelID. It returns
-`None` for v5 anisotropic runs.
+`FemticModel.model_to_block` gives the blockID of each free resistivity
+parameter only. It returns `None` for v5 anisotropic runs. For example,
+the small isotropic test has 10,694 blocks but only 10,693 free resistivity
+parameters: `/rough` has 10,694 rows while J has 10,693 columns without distortion.
 
 ```python
 m = res.model
 J_blocks = np.zeros((jac.n_data, m.n_blocks))
-J_blocks[:, m.model_to_block] = jac.J
+n_free_rho = len(m.model_to_block)
+J_blocks[:, m.model_to_block] = jac.J[:, :n_free_rho]
+J_distortion = jac.J[:, n_free_rho:]  # separate parameters, possibly zero columns
 ```
 
 ---
@@ -195,7 +207,7 @@ a retrial; there is no attribute distinguishing old files from new ones.
 | `rho_xx` ... `slant`, `is_anisotropic` | `(nBlocks,)` or `None` | v5 anisotropic runs only |
 | `n_blocks` | property | number of blocks |
 | `free_mask` | property, `(nBlocks,)` bool | True for free blocks |
-| `model_to_block` | property, `(nModel,)` or `None` | blockID of each modelID |
+| `model_to_block` | property, `(nFreeResistivity,)` or `None` | blockID of each free resistivity parameter; excludes distortion columns |
 | `sensitivity_per_element(volume_normalised=True)` | method | sensitivity mapped to elements |
 
 ### Data codes

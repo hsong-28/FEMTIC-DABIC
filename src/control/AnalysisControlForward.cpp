@@ -1,3 +1,10 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC forward-computation member definitions split from AnalysisControl.cpp.
  * This file owns forward-response cache dispatch and sensitivity calculation flow.

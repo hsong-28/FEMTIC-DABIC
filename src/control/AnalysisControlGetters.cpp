@@ -1,3 +1,12 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-14 to 2026-10-02).
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC getter definitions split from AnalysisControl.cpp.
  * This file must not own parser, line-search, forward, or convergence behavior.
@@ -318,7 +327,6 @@ bool AnalysisControl::writeBinaryFormat() const
 
 // Get flag specifing whether per-iteration csv/vtk diagnostic output is
 // suppressed (OFILE_TYPE == -1). See the declaration in AnalysisControl.h.
-// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-14.
 bool AnalysisControl::suppressCsvVtkOutput() const
 {
 	return m_suppressCsvVtkOutput;

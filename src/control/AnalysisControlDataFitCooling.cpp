@@ -1,3 +1,10 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC data-fit-bracketed cooling member definitions.
  * This file owns the standalone initial-alpha scan and its forward-only trial boundary.

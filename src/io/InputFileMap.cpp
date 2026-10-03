@@ -4,13 +4,8 @@
 // Copyright (c) 2026 Volker Rath (DIAS)
 // SPDX-License-Identifier: MIT
 //
-// New file added by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
-//
 // Optional runtime remapping of FEMTIC-DABIC's hard-coded input file names.
 // See InputFileMap.h for the file format and semantics.
-//
-// Modified (added findOnDisk(): case-insensitive on-disk file name matching, wired into
-// resolve()) by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-09-27.
 //-------------------------------------------------------------------------------------------------------
 #include "InputFileMap.h"
 

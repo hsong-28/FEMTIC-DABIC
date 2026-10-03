@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
-// Copyright (c) 2026 Han Song
-// Modified from Copyright (c) 2021 Yoshiya Usui
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-14 to 2026-10-02).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -353,8 +357,6 @@ public:
 	// affect resistivity_block_iterX.dat, distortion_iterX.dat,
 	// sensitivity_iterX.dat/sensitivity_normalized_iterX.dat, or any other
 	// .dat/.h5 output.
-	// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
-	// (Anthropic), 2026-09-14.
 	bool suppressCsvVtkOutput() const;
 
 	// Get inversion method
@@ -771,8 +773,6 @@ private:
 	// Flag specifing whether per-iteration csv/vtk diagnostic output is
 	// suppressed (OFILE_TYPE == -1 in control.dat). See
 	// suppressCsvVtkOutput() above.
-	// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
-	// (Anthropic), 2026-09-14.
 	bool m_suppressCsvVtkOutput;
 
 	// Type of galvanic distortion

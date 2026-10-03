@@ -1,38 +1,14 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified from Copyright (c) 2025 Han Song
-// (HDF5 output extension added 2025-06-23, in femtic_v4_src)
 //
-// OutputHDF5.cpp  –  Writes results_iterX.h5 (model + data + distortion)
-//                    after every completed FEMTIC iteration.
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
 //
-// Compile with -lhdf5 (or -lhdf5_hl -lhdf5).
-// This is the femtic_dabic_v2.7_src port: all classes it depends on
-// (ResistivityBlock, MeshData, ObservedData and its 8 station types,
-// Inversion, DoubleSparseMatrix/RougheningSquareMatrix) expose the same
-// API used here under identical member/method names as femtic_v4_src, so
-// the implementation below is unchanged from that tree.
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-10-01).
+// Writes are checked and staged before publication; see OutputHDF5.h for the schema.
 //-------------------------------------------------------------------------------------------------------
-// New file: ported from femtic_v4_src/OutputHDF5.cpp to femtic_dabic_v2.7_src
-// by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-21.
-// Further modified (outputModelToHDF5 now takes a pre-reduced sensitivity
-// array instead of calling Inversion::getSensitivityScalarValuesReduced()
-// itself, which performs a collective MPI_Allreduce and previously
-// deadlocked the run when invoked only from PE 0) by Volker Rath (DIAS)
-// with the help of Claude Sonnet 5 (Anthropic), 2026-09-09.
-// Further modified (merged model_iterX.h5 + data_iterX.h5 +
-// distortion_iterX.dat into one results_iterX.h5, and added calculated
-// response values -- cal_re/cal_im -- to /data, gathered across all PEs via
-// MPI_Gatherv since the calculation is frequency-partitioned; ported from
-// femtic_v4_src, implementation unchanged) by Volker Rath (DIAS) with the
-// help of Claude Sonnet 5 (Anthropic), 2026-09-13.
-// Further modified (jacobian.h5, rough.h5 and mesh.h5 merged into one
-// exchange.h5 with /jacobian, /rough and /mesh groups, written by
-// outputJacobianToHDF5() exactly when the Jacobian is written;
-// outputRougheningMatrixToHDF5()/outputMeshToHDF5() and the _HDF5_ROUGH /
-// _HDF5_MESH flags removed) by Volker Rath (DIAS) with the help of
-// Claude Sonnet 5.5 (Anthropic), 2026-10-01.
 #include "OutputHDF5.h"
 
 #include <hdf5.h>
@@ -44,6 +20,9 @@
 #include <map>
 #include <limits>
 #include <utility>
+#include <cstdio>
+#include <cerrno>
+#include <stdexcept>
 
 #include "AnalysisControl.h"
 #include "ResistivityBlock.h"
@@ -74,23 +53,75 @@
 //===========================================================================
 namespace {
 
-// Abort with an error message if an HDF5 call returns a negative id.
+// Optional exports must not terminate one MPI rank on an I/O failure.
 static void hdf5check( hid_t id, const char* msg )
 {
-    if( id < 0 ){
-        OutputFiles::m_logFile << "HDF5 error in " << msg << std::endl;
-        exit(1);
+    if( id < 0 ) throw std::runtime_error(msg);
+}
+
+// Release every local HDF5 object during unwinding; check normal closes too.
+class HdfHandle {
+public:
+    HdfHandle() : id(-1), closer(NULL) {}
+    HdfHandle( hid_t value, herr_t (*closeFunction)(hid_t) ) : id(value), closer(closeFunction) {
+        hdf5check(id, "HDF5 object creation");
+    }
+    HdfHandle( HdfHandle&& other ) noexcept : id(other.id), closer(other.closer) { other.id = -1; }
+    HdfHandle& operator=( HdfHandle&& other ) {
+        close();
+        id = other.id; closer = other.closer; other.id = -1;
+        return *this;
+    }
+    ~HdfHandle() {
+        if( id >= 0 && closer(id) < 0 )
+            OutputFiles::m_logFile << "# Warning: HDF5 cleanup close failed." << std::endl;
+    }
+    operator hid_t() const { return id; }
+    void close() {
+        if( id >= 0 ) {
+            hdf5check(closer(id), "HDF5 object close");
+            id = -1;
+        }
+    }
+    HdfHandle( const HdfHandle& ) = delete;
+    HdfHandle& operator=( const HdfHandle& ) = delete;
+private:
+    hid_t id;
+    herr_t (*closer)(hid_t);
+};
+
+// Publish only a fully written and closed file. Never truncate the old export.
+template <typename Writer>
+static bool writeHdfFile( const std::string& filename, int iteration, Writer writer )
+{
+    const std::string temporary = filename + ".tmp";
+    bool created = false;
+    try {
+        HdfHandle file(H5Fcreate(temporary.c_str(), H5F_ACC_EXCL, H5P_DEFAULT, H5P_DEFAULT), H5Fclose);
+        created = true;
+        writer(file);
+        file.close();
+        if( std::rename(temporary.c_str(), filename.c_str()) != 0 )
+            throw std::runtime_error(std::string("publishing completed file: ") + std::strerror(errno));
+        return true;
+    } catch( const std::exception& error ) {
+        OutputFiles::m_logFile << "# Warning: skipping HDF5 export " << filename
+                               << " for iteration " << iteration << " (" << error.what()
+                               << "). Any existing final file is unchanged and may be stale; inversion continues." << std::endl;
+        if( created && std::remove(temporary.c_str()) != 0 )
+            OutputFiles::m_logFile << "# Warning: could not remove incomplete temporary file " << temporary << std::endl;
+        return false;
     }
 }
 
 // Write a scalar int attribute on an open group/dataset.
 static void writeIntAttr( hid_t obj, const char* name, int val )
 {
-    hid_t sp = H5Screate( H5S_SCALAR );
-    hid_t at = H5Acreate2( obj, name, H5T_NATIVE_INT, sp, H5P_DEFAULT, H5P_DEFAULT );
-    H5Awrite( at, H5T_NATIVE_INT, &val );
-    H5Aclose( at );
-    H5Sclose( sp );
+    HdfHandle sp( H5Screate( H5S_SCALAR ), H5Sclose );
+    HdfHandle at( H5Acreate2( obj, name, H5T_NATIVE_INT, sp, H5P_DEFAULT, H5P_DEFAULT ), H5Aclose );
+    hdf5check( H5Awrite( at, H5T_NATIVE_INT, &val ), "H5Awrite" );
+    at.close();
+    sp.close();
 }
 
 // Compound data row for the /blocks dataset.
@@ -127,48 +158,48 @@ struct DataRow {
 // translation unit, so no local duplicate type is needed here.
 
 // Create the HDF5 compound type for BlockRow.
-static hid_t makeBlockType()
+static HdfHandle makeBlockType()
 {
-    hid_t t = H5Tcreate( H5T_COMPOUND, sizeof(BlockRow) );
-    H5Tinsert( t, "blockID",     HOFFSET(BlockRow,blockID),     H5T_NATIVE_INT    );
-    H5Tinsert( t, "resistivity", HOFFSET(BlockRow,resistivity), H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "rho_min",     HOFFSET(BlockRow,rho_min),     H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "rho_max",     HOFFSET(BlockRow,rho_max),     H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "weight",      HOFFSET(BlockRow,weight),      H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "type",        HOFFSET(BlockRow,type),        H5T_NATIVE_INT    );
+    HdfHandle t( H5Tcreate( H5T_COMPOUND, sizeof(BlockRow) ), H5Tclose );
+    hdf5check( H5Tinsert( t, "blockID",     HOFFSET(BlockRow,blockID),     H5T_NATIVE_INT    ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "resistivity", HOFFSET(BlockRow,resistivity), H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "rho_min",     HOFFSET(BlockRow,rho_min),     H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "rho_max",     HOFFSET(BlockRow,rho_max),     H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "weight",      HOFFSET(BlockRow,weight),      H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "type",        HOFFSET(BlockRow,type),        H5T_NATIVE_INT    ), "H5Tinsert" );
     return t;
 }
 
 // Create the HDF5 compound type for DataRow.
-static hid_t makeDataType()
+static HdfHandle makeDataType()
 {
-    hid_t t = H5Tcreate( H5T_COMPOUND, sizeof(DataRow) );
-    H5Tinsert( t, "freq",      HOFFSET(DataRow,freq),      H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "datatype",  HOFFSET(DataRow,datatype),  H5T_NATIVE_INT    );
-    H5Tinsert( t, "site_id",   HOFFSET(DataRow,site_id),   H5T_NATIVE_INT    );
-    H5Tinsert( t, "site_x",    HOFFSET(DataRow,site_x),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "site_y",    HOFFSET(DataRow,site_y),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "site_z",    HOFFSET(DataRow,site_z),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "re_val",    HOFFSET(DataRow,re_val),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "im_val",    HOFFSET(DataRow,im_val),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "re_err",    HOFFSET(DataRow,re_err),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "im_err",    HOFFSET(DataRow,im_err),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "cal_re",    HOFFSET(DataRow,cal_re),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "cal_im",    HOFFSET(DataRow,cal_im),    H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "component", HOFFSET(DataRow,component), H5T_NATIVE_INT    );
+    HdfHandle t( H5Tcreate( H5T_COMPOUND, sizeof(DataRow) ), H5Tclose );
+    hdf5check( H5Tinsert( t, "freq",      HOFFSET(DataRow,freq),      H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "datatype",  HOFFSET(DataRow,datatype),  H5T_NATIVE_INT    ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "site_id",   HOFFSET(DataRow,site_id),   H5T_NATIVE_INT    ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "site_x",    HOFFSET(DataRow,site_x),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "site_y",    HOFFSET(DataRow,site_y),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "site_z",    HOFFSET(DataRow,site_z),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "re_val",    HOFFSET(DataRow,re_val),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "im_val",    HOFFSET(DataRow,im_val),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "re_err",    HOFFSET(DataRow,re_err),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "im_err",    HOFFSET(DataRow,im_err),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "cal_re",    HOFFSET(DataRow,cal_re),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "cal_im",    HOFFSET(DataRow,cal_im),    H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "component", HOFFSET(DataRow,component), H5T_NATIVE_INT    ), "H5Tinsert" );
     return t;
 }
 
 // Create the HDF5 compound type for FemticHDF5DistortionRow.
-static hid_t makeDistortionType()
+static HdfHandle makeDistortionType()
 {
-    hid_t t = H5Tcreate( H5T_COMPOUND, sizeof(FemticHDF5DistortionRow) );
-    H5Tinsert( t, "site_id", HOFFSET(FemticHDF5DistortionRow,site_id), H5T_NATIVE_INT    );
-    H5Tinsert( t, "param1",  HOFFSET(FemticHDF5DistortionRow,param1),  H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "param2",  HOFFSET(FemticHDF5DistortionRow,param2),  H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "param3",  HOFFSET(FemticHDF5DistortionRow,param3),  H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "param4",  HOFFSET(FemticHDF5DistortionRow,param4),  H5T_NATIVE_DOUBLE );
-    H5Tinsert( t, "isFixed", HOFFSET(FemticHDF5DistortionRow,isFixed), H5T_NATIVE_INT    );
+    HdfHandle t( H5Tcreate( H5T_COMPOUND, sizeof(FemticHDF5DistortionRow) ), H5Tclose );
+    hdf5check( H5Tinsert( t, "site_id", HOFFSET(FemticHDF5DistortionRow,site_id), H5T_NATIVE_INT    ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "param1",  HOFFSET(FemticHDF5DistortionRow,param1),  H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "param2",  HOFFSET(FemticHDF5DistortionRow,param2),  H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "param3",  HOFFSET(FemticHDF5DistortionRow,param3),  H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "param4",  HOFFSET(FemticHDF5DistortionRow,param4),  H5T_NATIVE_DOUBLE ), "H5Tinsert" );
+    hdf5check( H5Tinsert( t, "isFixed", HOFFSET(FemticHDF5DistortionRow,isFixed), H5T_NATIVE_INT    ), "H5Tinsert" );
     return t;
 }
 
@@ -215,7 +246,7 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
 {
     const AnalysisControl* const pAC = AnalysisControl::getInstance();
 
-    hid_t grpModel = H5Gcreate2( fid, "/model", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpModel( H5Gcreate2( fid, "/model", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
 
     //------------------------------------------------------------------
     // /model/metadata  (group with scalar attributes)
@@ -227,12 +258,12 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
     const int nNodes  = pMesh->getNumNodeTotal();
     const int nBlocks = pRB->getNumResistivityBlockTotal();
 
-    hid_t grpMeta = H5Gcreate2( grpModel, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpMeta( H5Gcreate2( grpModel, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
     writeIntAttr( grpMeta, "iterNum", iterNum );
     writeIntAttr( grpMeta, "nElem",   nElem   );
     writeIntAttr( grpMeta, "nNodes",  nNodes  );
     writeIntAttr( grpMeta, "nBlocks", nBlocks );
-    H5Gclose( grpMeta );
+    grpMeta.close();
 
     //------------------------------------------------------------------
     // /model/element_block_map  – int[nElem]
@@ -243,11 +274,11 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
             ebmap[i] = pRB->getBlockIDFromElemID(i);
 
         hsize_t dims[1] = { (hsize_t)nElem };
-        hid_t sp  = H5Screate_simple( 1, dims, NULL );
-        hid_t ds  = H5Dcreate2( grpModel, "element_block_map", H5T_NATIVE_INT,
-                                 sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        H5Dwrite( ds, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, ebmap.data() );
-        H5Dclose(ds); H5Sclose(sp);
+        HdfHandle sp( H5Screate_simple( 1, dims, NULL ), H5Sclose );
+        HdfHandle ds( H5Dcreate2( grpModel, "element_block_map", H5T_NATIVE_INT,
+                                 sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+        hdf5check( H5Dwrite( ds, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, ebmap.data() ), "H5Dwrite" );
+        ds.close(); sp.close();
     }
 
     //------------------------------------------------------------------
@@ -265,18 +296,18 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
         }
 
         hsize_t dims[1] = { (hsize_t)nBlocks };
-        hid_t memType = makeBlockType();
-        hid_t sp  = H5Screate_simple( 1, dims, NULL );
-        hid_t ds  = H5Dcreate2( grpModel, "blocks", memType, sp,
-                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        H5Dwrite( ds, memType, H5S_ALL, H5S_ALL, H5P_DEFAULT, rows.data() );
-        H5Dclose(ds); H5Sclose(sp); H5Tclose(memType);
+        HdfHandle memType = makeBlockType();
+        HdfHandle sp( H5Screate_simple( 1, dims, NULL ), H5Sclose );
+        HdfHandle ds( H5Dcreate2( grpModel, "blocks", memType, sp,
+                                 H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+        hdf5check( H5Dwrite( ds, memType, H5S_ALL, H5S_ALL, H5P_DEFAULT, rows.data() ), "H5Dwrite" );
+        ds.close(); sp.close(); memType.close();
     }
 
     //------------------------------------------------------------------
     // /model/mesh/node_coords  – double[nNodes][3]
     //------------------------------------------------------------------
-    hid_t grpMesh = H5Gcreate2( grpModel, "mesh", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpMesh( H5Gcreate2( grpModel, "mesh", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
     {
         std::vector<double> coords( nNodes * 3 );
         for( int n = 0; n < nNodes; ++n ){
@@ -285,11 +316,11 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
             coords[ n*3 + 2 ] = pMesh->getZCoordinatesOfNodes(n);
         }
         hsize_t dims[2] = { (hsize_t)nNodes, 3 };
-        hid_t sp = H5Screate_simple( 2, dims, NULL );
-        hid_t ds = H5Dcreate2( grpMesh, "node_coords", H5T_NATIVE_DOUBLE,
-                                sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        H5Dwrite( ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, coords.data() );
-        H5Dclose(ds); H5Sclose(sp);
+        HdfHandle sp( H5Screate_simple( 2, dims, NULL ), H5Sclose );
+        HdfHandle ds( H5Dcreate2( grpMesh, "node_coords", H5T_NATIVE_DOUBLE,
+                                sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+        hdf5check( H5Dwrite( ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, coords.data() ), "H5Dwrite" );
+        ds.close(); sp.close();
     }
 
     //------------------------------------------------------------------
@@ -305,14 +336,14 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
                 enodes[ e*nNPE + k ] = pMesh->getNodesOfElements(e,k);
 
         hsize_t dims[2] = { (hsize_t)nElem, (hsize_t)nNPE };
-        hid_t sp = H5Screate_simple( 2, dims, NULL );
-        hid_t ds = H5Dcreate2( grpMesh, "elem_nodes", H5T_NATIVE_INT,
-                                sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        H5Dwrite( ds, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, enodes.data() );
-        H5Dclose(ds); H5Sclose(sp);
+        HdfHandle sp( H5Screate_simple( 2, dims, NULL ), H5Sclose );
+        HdfHandle ds( H5Dcreate2( grpMesh, "elem_nodes", H5T_NATIVE_INT,
+                                sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+        hdf5check( H5Dwrite( ds, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, enodes.data() ), "H5Dwrite" );
+        ds.close(); sp.close();
     }
 
-    H5Gclose( grpMesh );
+    grpMesh.close();
 
     //------------------------------------------------------------------
     // /model/sensitivity  (only when a pre-reduced sensitivity array was passed in)
@@ -339,30 +370,30 @@ static void writeModelGroup( hid_t fid, const int iterNum, const double* sensiti
             sensVol[iblk] = (raw > criteria) ? raw / vol : criteria;
         }
 
-        hid_t grpSens = H5Gcreate2( grpModel, "sensitivity",
-                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+        HdfHandle grpSens( H5Gcreate2( grpModel, "sensitivity",
+                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
         hsize_t dimB = (hsize_t)nBlocks2;
         {
-            hid_t sp = H5Screate_simple( 1, &dimB, NULL );
-            hid_t ds = H5Dcreate2( grpSens, "raw", H5T_NATIVE_DOUBLE,
-                                    sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-            H5Dwrite( ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
-                      H5P_DEFAULT, sensRaw.data() );
-            H5Dclose(ds); H5Sclose(sp);
+            HdfHandle sp( H5Screate_simple( 1, &dimB, NULL ), H5Sclose );
+            HdfHandle ds( H5Dcreate2( grpSens, "raw", H5T_NATIVE_DOUBLE,
+                                    sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+            hdf5check( H5Dwrite( ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, sensRaw.data() ), "H5Dwrite" );
+            ds.close(); sp.close();
         }
         {
-            hid_t sp = H5Screate_simple( 1, &dimB, NULL );
-            hid_t ds = H5Dcreate2( grpSens, "volume_normalised", H5T_NATIVE_DOUBLE,
-                                    sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-            H5Dwrite( ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
-                      H5P_DEFAULT, sensVol.data() );
-            H5Dclose(ds); H5Sclose(sp);
+            HdfHandle sp( H5Screate_simple( 1, &dimB, NULL ), H5Sclose );
+            HdfHandle ds( H5Dcreate2( grpSens, "volume_normalised", H5T_NATIVE_DOUBLE,
+                                    sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+            hdf5check( H5Dwrite( ds, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, sensVol.data() ), "H5Dwrite" );
+            ds.close(); sp.close();
         }
-        H5Gclose( grpSens );
+        grpSens.close();
     }
 #endif // _HDF5_OUT
 
-    H5Gclose( grpModel );
+    grpModel.close();
 
     OutputFiles::m_logFile << "# Written HDF5 /model group (iter " << iterNum << ")" << std::endl;
 }
@@ -719,26 +750,26 @@ static void writeDataGroup( hid_t fid, const int iterNum, const std::vector<Femt
     //----------------------------------------------------------------------
     const hsize_t nRows = rows.size();
 
-    hid_t grpData = H5Gcreate2( fid, "/data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpData( H5Gcreate2( fid, "/data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
 
     // Attribute: total row count, plus how many rows (if any) could not be
     // matched to a gathered calculated value -- see lookupCalc() above.
-    hid_t grpDataMeta = H5Gcreate2( grpData, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpDataMeta( H5Gcreate2( grpData, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
     writeIntAttr( grpDataMeta, "nRows",         (int)nRows     );
     writeIntAttr( grpDataMeta, "iterNum",       iterNum        );
     writeIntAttr( grpDataMeta, "nMissingCalc",  nMissingCalc   );
-    H5Gclose(grpDataMeta);
+    grpDataMeta.close();
 
     if( nRows > 0 ){
-        hid_t memType = makeDataType();
-        hid_t sp = H5Screate_simple( 1, &nRows, NULL );
-        hid_t ds = H5Dcreate2( grpData, "data", memType, sp,
-                                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        H5Dwrite( ds, memType, H5S_ALL, H5S_ALL, H5P_DEFAULT, rows.data() );
-        H5Dclose(ds); H5Sclose(sp); H5Tclose(memType);
+        HdfHandle memType = makeDataType();
+        HdfHandle sp( H5Screate_simple( 1, &nRows, NULL ), H5Sclose );
+        HdfHandle ds( H5Dcreate2( grpData, "data", memType, sp,
+                                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+        hdf5check( H5Dwrite( ds, memType, H5S_ALL, H5S_ALL, H5P_DEFAULT, rows.data() ), "H5Dwrite" );
+        ds.close(); sp.close(); memType.close();
     }
 
-    H5Gclose(grpData);
+    grpData.close();
 
     if( nMissingCalc > 0 ){
         // Not fatal -- results_iterN.h5 is a diagnostic/post-processing
@@ -775,27 +806,27 @@ static void writeDistortionGroup( hid_t fid, const int iterNum )
 
     const hsize_t nRows = rows.size();
 
-    hid_t grpDist = H5Gcreate2( fid, "/distortion", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpDist( H5Gcreate2( fid, "/distortion", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
 
-    hid_t grpDistMeta = H5Gcreate2( grpDist, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    HdfHandle grpDistMeta( H5Gcreate2( grpDist, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
     writeIntAttr( grpDistMeta, "iterNum", iterNum );
     writeIntAttr( grpDistMeta, "nRows",   (int)nRows );
     // AnalysisControl::TypeOfDistortion of this run -- see
     // ObservedData::outputDistortionParams()/collectDistortionParamsForHDF5()
     // for what param1..4 mean under each value.
     writeIntAttr( grpDistMeta, "type", pAC->getTypeOfDistortion() );
-    H5Gclose( grpDistMeta );
+    grpDistMeta.close();
 
     if( nRows > 0 ){
-        hid_t memType = makeDistortionType();
-        hid_t sp = H5Screate_simple( 1, &nRows, NULL );
-        hid_t ds = H5Dcreate2( grpDist, "params", memType, sp,
-                                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        H5Dwrite( ds, memType, H5S_ALL, H5S_ALL, H5P_DEFAULT, rows.data() );
-        H5Dclose(ds); H5Sclose(sp); H5Tclose(memType);
+        HdfHandle memType = makeDistortionType();
+        HdfHandle sp( H5Screate_simple( 1, &nRows, NULL ), H5Sclose );
+        HdfHandle ds( H5Dcreate2( grpDist, "params", memType, sp,
+                                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+        hdf5check( H5Dwrite( ds, memType, H5S_ALL, H5S_ALL, H5P_DEFAULT, rows.data() ), "H5Dwrite" );
+        ds.close(); sp.close(); memType.close();
     }
 
-    H5Gclose( grpDist );
+    grpDist.close();
 
     OutputFiles::m_logFile << "# Written HDF5 /distortion group (iter " << iterNum
                            << ", " << nRows << " rows)" << std::endl;
@@ -827,15 +858,11 @@ void outputResultsToHDF5( const int iterNum,
     std::ostringstream fname;
     fname << "results_iter" << iterNum << ".h5";
 
-    hid_t fid = H5Fcreate( fname.str().c_str(), H5F_ACC_TRUNC,
-                            H5P_DEFAULT, H5P_DEFAULT );
-    hdf5check( fid, "H5Fcreate results" );
-
-    writeModelGroup( fid, iterNum, sensitivityScalarValuesReduced );
-    writeDataGroup( fid, iterNum, calcRowsAll );
-    writeDistortionGroup( fid, iterNum );
-
-    H5Fclose( fid );
+    if( !writeHdfFile(fname.str(), iterNum, [&](hid_t fid) {
+        writeModelGroup( fid, iterNum, sensitivityScalarValuesReduced );
+        writeDataGroup( fid, iterNum, calcRowsAll );
+        writeDistortionGroup( fid, iterNum );
+    }) ) return;
 
     OutputFiles::m_logFile << "# Written HDF5 results file: " << fname.str() << std::endl;
 }
@@ -868,23 +895,22 @@ namespace {
 // Write a scalar string attribute (fixed-length, NUL-terminated).
 static void writeStringAttr( hid_t obj, const char* name, const char* val )
 {
-    hid_t sp    = H5Screate( H5S_SCALAR );
-    hid_t stype = H5Tcopy( H5T_C_S1 );
-    H5Tset_size( stype, strlen(val) + 1 );
-    hid_t at    = H5Acreate2( obj, name, stype, sp, H5P_DEFAULT, H5P_DEFAULT );
-    H5Awrite( at, stype, val );
-    H5Aclose( at ); H5Tclose( stype ); H5Sclose( sp );
+    HdfHandle sp( H5Screate( H5S_SCALAR ), H5Sclose );
+    HdfHandle stype( H5Tcopy( H5T_C_S1 ), H5Tclose );
+    hdf5check( H5Tset_size( stype, strlen(val) + 1 ), "H5Tset_size" );
+    HdfHandle at( H5Acreate2( obj, name, stype, sp, H5P_DEFAULT, H5P_DEFAULT ), H5Aclose );
+    hdf5check( H5Awrite( at, stype, val ), "H5Awrite" );
+    at.close(); stype.close(); sp.close();
 }
 
 // Create + write one dataset of the given native type and shape.
 static void writeDataset( hid_t loc, const char* name, hid_t type,
                           const int rank, const hsize_t* dims, const void* buf )
 {
-    hid_t sp = H5Screate_simple( rank, dims, NULL );
-    hid_t ds = H5Dcreate2( loc, name, type, sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-    hdf5check( ds, name );
-    H5Dwrite( ds, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, buf );
-    H5Dclose( ds ); H5Sclose( sp );
+    HdfHandle sp( H5Screate_simple( rank, dims, NULL ), H5Sclose );
+    HdfHandle ds( H5Dcreate2( loc, name, type, sp, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Dclose );
+    hdf5check( H5Dwrite( ds, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, buf ), "H5Dwrite" );
+    ds.close(); sp.close();
 }
 
 static void writeDataset1D( hid_t loc, const char* name, hid_t type, const hsize_t n, const void* buf )
@@ -900,14 +926,12 @@ static void writeDataset2D( hid_t loc, const char* name, hid_t type,
 }
 
 // Create group <name> with an empty "metadata" subgroup. Returns the
-// metadata group id (caller writes attributes, then H5Gclose()); the parent
+// metadata group handle (caller writes attributes, then closes it); the parent
 // group id is returned through grpOut (caller adds datasets, then closes it).
-static hid_t createGroupWithMetadata( hid_t fid, const char* name, hid_t* grpOut )
+static HdfHandle createGroupWithMetadata( hid_t fid, const char* name, HdfHandle* grpOut )
 {
-    *grpOut = H5Gcreate2( fid, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-    hdf5check( *grpOut, name );
-    hid_t meta = H5Gcreate2( *grpOut, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-    hdf5check( meta, "metadata" );
+    *grpOut = HdfHandle( H5Gcreate2( fid, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
+    HdfHandle meta( H5Gcreate2( *grpOut, "metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
     return meta;
 }
 
@@ -916,17 +940,17 @@ static void writeJacobianGroup( hid_t fid, const int iterNum,
                                 const int numDataTotal, const int numModel,
                                 const double* J, const double* dataErrors )
 {
-    hid_t grp;
-    hid_t meta = createGroupWithMetadata( fid, "/jacobian", &grp );
+    HdfHandle grp;
+    HdfHandle meta = createGroupWithMetadata( fid, "/jacobian", &grp );
     writeIntAttr( meta, "iterNum",  iterNum      );
     writeIntAttr( meta, "nData",    numDataTotal );
     writeIntAttr( meta, "nModel",   numModel     );
     writeIntAttr( meta, "weighted", 1            ); // J = Cd^{-1/2} * dF/dm
-    H5Gclose( meta );
+    meta.close();
 
     writeDataset2D( grp, "values",      H5T_NATIVE_DOUBLE, (hsize_t)numDataTotal, (hsize_t)numModel, J );
     writeDataset1D( grp, "data_errors", H5T_NATIVE_DOUBLE, (hsize_t)numDataTotal, dataErrors );
-    H5Gclose( grp );
+    grp.close();
 }
 
 //--- /rough ---------------------------------------------------------------
@@ -944,17 +968,17 @@ static void writeRoughGroup( hid_t fid, const RougheningSquareMatrix& R )
         values[k] = R.getValueCRS(k);
     }
 
-    hid_t grp;
-    hid_t meta = createGroupWithMetadata( fid, "/rough", &grp );
+    HdfHandle grp;
+    HdfHandle meta = createGroupWithMetadata( fid, "/rough", &grp );
     writeIntAttr( meta, "nRows",     nRows    );
     writeIntAttr( meta, "nNonZeros", nNonZero );
     writeStringAttr( meta, "format", "CSR" );
-    H5Gclose( meta );
+    meta.close();
 
     writeDataset1D( grp, "row_ptr", H5T_NATIVE_INT,    (hsize_t)(nRows + 1), rowPtr.data() );
     writeDataset1D( grp, "col_ind", H5T_NATIVE_INT,    (hsize_t)nNonZero,    colInd.data() );
     writeDataset1D( grp, "values",  H5T_NATIVE_DOUBLE, (hsize_t)nNonZero,    values.data() );
-    H5Gclose( grp );
+    grp.close();
 }
 
 //--- /mesh ----------------------------------------------------------------
@@ -976,8 +1000,8 @@ static void writeMeshGroup( hid_t fid, const MeshData* const pMesh )
         dynamic_cast<const MeshDataNonConformingHexaElement*>( pMesh );
     const int neighborFormat = ( pMeshNC != NULL ) ? 1 : 0; // 0=dense, 1=CSR
 
-    hid_t grp;
-    hid_t meta = createGroupWithMetadata( fid, "/mesh", &grp );
+    HdfHandle grp;
+    HdfHandle meta = createGroupWithMetadata( fid, "/mesh", &grp );
     writeIntAttr( meta, "meshType",       meshType       );
     writeIntAttr( meta, "nNodes",         nNodes         );
     writeIntAttr( meta, "nElem",          nElem          );
@@ -986,7 +1010,7 @@ static void writeMeshGroup( hid_t fid, const MeshData* const pMesh )
     if( neighborFormat == 0 ){
         writeIntAttr( meta, "nNeighborElem", pMesh->getNumNeighborElement() );
     }
-    H5Gclose( meta );
+    meta.close();
 
     {   // node_coords  double[nNodes][3]
         std::vector<double> coords( (size_t)nNodes * 3 );
@@ -1037,7 +1061,7 @@ static void writeMeshGroup( hid_t fid, const MeshData* const pMesh )
         writeDataset1D( grp, "neighbor_face_ptr", H5T_NATIVE_INT, (hsize_t)(nFaceSlots + 1), facePtr.data() );
         writeDataset1D( grp, "neighbor_elements", H5T_NATIVE_INT, (hsize_t)neighbors.size(), neighbors.data() );
     }
-    H5Gclose( grp );
+    grp.close();
 }
 
 } // anonymous namespace
@@ -1055,26 +1079,22 @@ void outputJacobianToHDF5( const int iterNum,
     const AnalysisControl* const pAC = AnalysisControl::getInstance();
     if( pAC->getMyPE() != 0 ) return;
 
-    // Fixed filename, truncated on every call: Femtic Jacobians can be very
+    // Fixed filename, replaced after a successful export: Jacobians can be very
     // large, so only the most recently written one is kept on disk. The
     // iteration number is recorded in /metadata and /jacobian/metadata.
     const std::string fname = "exchange.h5";
 
-    hid_t fid = H5Fcreate( fname.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
-    hdf5check( fid, "H5Fcreate exchange" );
-
-    {   // /metadata
-        hid_t grpMeta = H5Gcreate2( fid, "/metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-        writeIntAttr( grpMeta, "iterNum",         iterNum );
-        writeIntAttr( grpMeta, "exchangeVersion", 1       );
-        H5Gclose( grpMeta );
-    }
-
-    writeJacobianGroup( fid, iterNum, numDataTotal, numModel, sensitivityMatrix, dataErrorsGlobal );
-    writeRoughGroup( fid, ResistivityBlock::getInstance()->getRougheningMatrix() );
-    writeMeshGroup( fid, pAC->getPointerOfMeshData() );
-
-    H5Fclose( fid );
+    if( !writeHdfFile(fname, iterNum, [&](hid_t fid) {
+        {   // /metadata
+            HdfHandle grpMeta( H5Gcreate2( fid, "/metadata", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT ), H5Gclose );
+            writeIntAttr( grpMeta, "iterNum",         iterNum );
+            writeIntAttr( grpMeta, "exchangeVersion", 1       );
+            grpMeta.close();
+        }
+        writeJacobianGroup( fid, iterNum, numDataTotal, numModel, sensitivityMatrix, dataErrorsGlobal );
+        writeRoughGroup( fid, ResistivityBlock::getInstance()->getRougheningMatrix() );
+        writeMeshGroup( fid, pAC->getPointerOfMeshData() );
+    }) ) return;
 
     OutputFiles::m_logFile << "# Written HDF5 exchange file: " << fname
                            << "  (jacobian " << numDataTotal << " data x " << numModel

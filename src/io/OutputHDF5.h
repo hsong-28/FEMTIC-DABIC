@@ -1,23 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified from Copyright (c) 2025 Han Song
-// (HDF5 output extension added 2025-06-23, in femtic_v4_src)
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-10-01).
 //-------------------------------------------------------------------------------------------------------
-// New file: ported from femtic_v4_src/OutputHDF5.h to femtic_dabic_v2.7_src by
-// Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-21. Adapted only
-// for this tree's per-subdirectory include layout (VPATH covers all of them,
-// so include lines are unchanged); no API or on-disk format changes.
-// Further modified (outputModelToHDF5 signature changed to take a
-// pre-reduced sensitivity array instead of an Inversion* — avoids an
-// MPI_Allreduce deadlock; see .cpp changelog and femtic_v4_src fix) by
-// Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-09.
-// Further modified (merged model_iterX.h5 + data_iterX.h5 +
-// distortion_iterX.dat into one results_iterX.h5, and added calculated
-// response values -- cal_re/cal_im -- to /data, gathered across all PEs via
-// MPI_Gatherv since the calculation is frequency-partitioned; ported from
-// femtic_v4_src) by Volker Rath (DIAS) with the help of Claude Sonnet 5
-// (Anthropic), 2026-09-13.
 #ifndef DBLDEF_OUTPUT_HDF5
 #define DBLDEF_OUTPUT_HDF5
 

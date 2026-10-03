@@ -1,8 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
-// Copyright (c) 2026 Han Song
-// Modified from Copyright (c) 2021 Yoshiya Usui
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-08-05 to 2026-10-02).
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,10 +27,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
-// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
-// Further modified (fixed MPI_Allreduce deadlock in HDF5 sensitivity
-// reduction — see comments around outputModelToHDF5() call) by Volker Rath
-// (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-09.
 #include <iostream>
 #include <sstream>
 #include <stdlib.h>
@@ -2152,24 +2153,52 @@ void AnalysisControl::inputControlData()
 	rawFile.close();
 
 	std::istringstream inFile(controlBuffer);
+	std::string unreadControl(controlBuffer);
+	std::string currentKeyword;
+	std::string::size_type currentBegin = std::string::npos;
+	std::vector<std::string> readKeywords;
+
+	// Keep each existing value reader and its dependency order. Only erase the
+	// span it consumed; leftover tokens are invalid or duplicate input.
+	auto finishKeyword = [&]()
+	{
+		if (currentBegin == std::string::npos) return;
+		if (inFile.fail())
+		{
+			OutputFiles::m_logFile << "Error : Invalid or missing value for " << currentKeyword << " in control.dat." << std::endl;
+			exit(1);
+		}
+		const std::string::size_type end = inFile.eof() ? unreadControl.size()
+			: static_cast<std::string::size_type>(inFile.tellg());
+		unreadControl.replace(currentBegin, end - currentBegin, end - currentBegin, ' ');
+		currentBegin = std::string::npos;
+	};
 
 	// Rewind the stream to the beginning so keywords can be searched in any order
-	auto resetStream = [&inFile]()
+	auto resetStream = [&]()
 	{
 		inFile.clear();
+		inFile.str(unreadControl);
 		inFile.seekg(0);
 	};
 
 	// Rewind and scan token-by-token for a keyword, leaving the stream positioned
 	// immediately after the matching token so the associated value(s) can be read
-	auto seekKeyword = [&inFile, &resetStream](const std::string &keyword, const std::string::size_type len) -> bool
+	auto seekKeyword = [&](const std::string &keyword, const std::string::size_type len) -> bool
 	{
+		finishKeyword();
 		resetStream();
 		std::string token;
 		while (inFile >> token)
 		{
+			if (ControlKeywords::isEndKeywordLine(token)) break;
 			if (token.substr(0, len).compare(keyword) == 0)
 			{
+				const std::string::size_type end = inFile.eof() ? unreadControl.size()
+					: static_cast<std::string::size_type>(inFile.tellg());
+				currentBegin = end - token.size();
+				currentKeyword = keyword;
+				readKeywords.push_back(keyword);
 				return true;
 			}
 		}
@@ -2393,7 +2422,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::DISTORTION])
 		{
-			OutputFiles::m_logFile << "Error : You must write DISTORTION data above WEIGHT_OF_DISTORTION" << std::endl;
+			OutputFiles::m_logFile << "Error : WEIGHT_OF_DISTORTION requires DISTORTION in control.dat." << std::endl;
 			exit(1);
 		}
 
@@ -2453,7 +2482,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_TRADE_OFF_PARAMETER])
 		{
-			OutputFiles::m_logFile << "Error : You must write TYPE_OF_TRADE_OFF_PARAMETER data above TRADE_OFF_PARAM" << std::endl;
+			OutputFiles::m_logFile << "Error : TRADE_OFF_PARAM requires TYPE_OF_TRADE_OFF_PARAMETER in control.dat." << std::endl;
 			exit(1);
 		}
 		const int paramID = AnalysisControl::TRADE_OFF_PARAM;
@@ -2602,7 +2631,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_CG])
 		{
-			OutputFiles::m_logFile << "Error : You must write TYPE_OF_CG data above TRADE_OFF_CG" << std::endl;
+			OutputFiles::m_logFile << "Error : TRADE_OFF_CG requires TYPE_OF_CG in control.dat." << std::endl;
 			exit(1);
 		}
 		const int paramID = AnalysisControl::TRADE_OFF_CG;
@@ -2648,7 +2677,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_REFERENCE])
 		{
-			OutputFiles::m_logFile << "Error : You must write TYPE_OF_CG data above TRADE_OFF_CG" << std::endl;
+			OutputFiles::m_logFile << "Error : WEIGHT_OF_REFERENCE requires TYPE_OF_REFERENCE in control.dat." << std::endl;
 			exit(1);
 		}
 		const int paramID = AnalysisControl::WEIGHT_OF_REFERENCE;
@@ -2671,7 +2700,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::TYPE_OF_REFERENCE])
 		{
-			OutputFiles::m_logFile << "Error : You must write TYPE_OF_REFERENCE data above NORM_OF_MINIMUMNORM" << std::endl;
+			OutputFiles::m_logFile << "Error : NORM_OF_MINIMUMNORM requires TYPE_OF_REFERENCE in control.dat." << std::endl;
 			exit(1);
 		}
 		const int paramID = AnalysisControl::NORM_OF_MINIMUMNORM;
@@ -2786,8 +2815,6 @@ void AnalysisControl::inputControlData()
 			// Kept in ASCII mode (m_binaryOutput = false) rather than
 			// binary -- see the matching comment in femtic_v4_src/
 			// femtic_v5_src for why.
-			// Added by Volker Rath (DIAS) with the help of Claude Sonnet
-			// 5 (Anthropic), 2026-09-14.
 			m_binaryOutput = false;
 			m_suppressCsvVtkOutput = true;
 		}
@@ -2894,7 +2921,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
 		{
-			OutputFiles::m_logFile << "Error : You must write INV_METHOD data above RUN_INEXACT_LINE_SEARCH" << std::endl;
+			OutputFiles::m_logFile << "Error : RUN_INEXACT_LINE_SEARCH requires INV_METHOD in control.dat." << std::endl;
 			exit(1);
 		}
 		if (!m_ABICinversion)
@@ -2933,7 +2960,7 @@ void AnalysisControl::inputControlData()
 		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
 		{
 			OutputFiles::m_logFile
-				<< "Error : You must write INV_METHOD above ABIC_SEARCH_MODE."
+				<< "Error : ABIC_SEARCH_MODE requires INV_METHOD in control.dat."
 				<< std::endl;
 			exit(1);
 		}
@@ -2979,7 +3006,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
 		{
-			OutputFiles::m_logFile << "Error : You must write INV_METHOD data above RUN_INEXACT_OCCAM_LINE_SEARCH" << std::endl;
+			OutputFiles::m_logFile << "Error : RUN_INEXACT_OCCAM_LINE_SEARCH requires INV_METHOD in control.dat." << std::endl;
 			exit(1);
 		}
 		if (!m_OCCAMinversion)
@@ -3007,7 +3034,7 @@ void AnalysisControl::inputControlData()
 
 		if (!hasAlreadyRead[AnalysisControl::INV_METHOD])
 		{
-			OutputFiles::m_logFile << "Error : You must write INV_METHOD data above ALPHA_COOLING" << std::endl;
+			OutputFiles::m_logFile << "Error : ALPHA_COOLING requires INV_METHOD in control.dat." << std::endl;
 			exit(1);
 		}
 		if (m_inversionMethod != Inversion::DATA_FIT_COOLING_DATA_SPECE)
@@ -3238,9 +3265,10 @@ void AnalysisControl::inputControlData()
 	//   ACTIVATE_HDF5_EXCHANGE   exchange.h5 (Jacobian + roughening matrix + mesh)
 	// Each keyword may stand alone (= on) or be followed by an explicit 0/1 on
 	// the same or the next line. Absent keyword = off.
-	auto readOptionalFlag = [&inFile](const char *keyword) -> bool
+	auto readOptionalFlag = [&](const char *keyword) -> bool
 	{
-		const std::istringstream::pos_type posAfterKeyword = inFile.tellg();
+		const std::istringstream::pos_type posAfterKeyword = inFile.eof()
+			? std::istringstream::pos_type(unreadControl.size()) : inFile.tellg();
 		std::string next;
 		if (inFile >> next)
 		{
@@ -3269,7 +3297,7 @@ void AnalysisControl::inputControlData()
 	{
 		OutputFiles::m_logFile
 			<< "Error : " << keyword << " is set in control.dat, but this executable was built without that HDF5 support. "
-			<< "Rebuild with " << makeFlag << "=yes (make -f Makefile_hdf5 " << makeFlag << "=yes), or remove "
+			<< "Rebuild with " << makeFlag << "=yes (make " << makeFlag << "=yes), or remove "
 			<< keyword << " from control.dat." << std::endl;
 		if (m_myPE == 0)
 		{
@@ -3345,6 +3373,21 @@ void AnalysisControl::inputControlData()
 	{
 
 		inFile >> m_directoryOfOutOfCoreFilesForSensitivityMatrix;
+	}
+	finishKeyword();
+	std::istringstream remaining(unreadControl);
+	std::string unexpected;
+	if (remaining >> unexpected && !ControlKeywords::isEndKeywordLine(unexpected))
+	{
+		bool duplicate = false;
+		for (const std::string& keyword : readKeywords)
+		{
+			if (unexpected.substr(0, keyword.size()) == keyword) duplicate = true;
+		}
+		OutputFiles::m_logFile << (duplicate
+			? "Error : Already read the data from control.dat !! : "
+			: "Error : Improper data !! ") << unexpected << std::endl;
+		exit(1);
 	}
 
 	if (!hasAlreadyRead[AnalysisControl::DISTORTION])

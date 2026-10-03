@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-08-05 to 2026-10-01).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -22,13 +26,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
-// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
-// Further modified (HDF5 output support ported from femtic_v4_src) by Volker
-// Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-21.
-// Further modified (rough.h5 write removed from calcRougheningMatrix(); the
-// matrix now goes into exchange.h5 together with the Jacobian, via the new
-// getRougheningMatrix() accessor) by Volker Rath (DIAS) with the help of
-// Claude Sonnet 5.5 (Anthropic), 2026-10-01.
 #include "ResistivityBlock.h"
 #include "MeshDataBrickElement.h"
 #include "MeshDataNonConformingHexaElement.h"
@@ -42,6 +39,7 @@
 #include <string.h>
 #include <assert.h>
 #include <cmath>
+#include <cerrno>
 #include <iomanip>
 #include <sstream>
 #include <vector>
@@ -2072,7 +2070,6 @@ void ResistivityBlock::outputResisitivityBlock(const int iterNum) const
 // using the same 1.0e-20 sentinel for fixed blocks; unlike the resistivity
 // value slot the min/max/weight columns don't apply here, so they are
 // written as 0.0.
-// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-14.
 void ResistivityBlock::outputSensitivityBlock( const int iterNum, const double* sensitivityScalarValuesReduced ) const
 {
 
@@ -2100,26 +2097,40 @@ void ResistivityBlock::outputSensitivityBlock( const int iterNum, const double* 
 		std::ostringstream fileName;
 		fileName << specs[ifile].prefix << iterNum << ".dat";
 
-		FILE *fp;
-		if( (fp = fopen( fileName.str().c_str(), "w")) == NULL ) {
-			OutputFiles::m_logFile  << "File open error !! : " << fileName.str() << std::endl;
-			exit(1);
+		// Publish only a complete optional export, preserving any previous file.
+		const std::string temporary = fileName.str() + ".tmp";
+		const char* failure = NULL;
+		int savedErrno = 0;
+		auto failed = [&]( const char* stage ) {
+			if( failure == NULL ) { failure = stage; savedErrno = errno; }
+		};
+		FILE* fp = fopen( temporary.c_str(), "wx" );
+		const bool created = fp != NULL;
+		if( !created ) {
+			failed("create");
+		} else {
+			if( fprintf(fp, "%10d%10d\n", numElemTotal, m_numResistivityBlockTotal ) < 0 ) failed("write");
+			for( int iElem = 0; iElem < numElemTotal && failure == NULL; ++iElem ){
+				if( fprintf(fp, "%10d%10d\n", iElem, m_elementID2blockID[iElem] ) < 0 ) failed("write");
+			}
+			const std::vector<double>& values = *specs[ifile].values;
+			for( int iBlk = 0; iBlk < m_numResistivityBlockTotal && failure == NULL; ++iBlk ){
+				if( fprintf(fp, "%10d%5s%15e%15e%15e%15e%10d\n", iBlk, "     ",
+					values[iBlk], 0.0, 0.0, 0.0,
+					getTypeOfResistivityBlock(m_fixResistivityValues[iBlk], m_isolated[iBlk]) ) < 0 ) failed("write");
+			}
+			if( ferror(fp) ) failed("write");
+			if( fflush(fp) != 0 ) failed("flush");
+			if( fclose(fp) != 0 ) failed("close");
+			if( failure == NULL && rename(temporary.c_str(), fileName.str().c_str()) != 0 ) failed("publish");
 		}
-
-		fprintf(fp, "%10d%10d\n", numElemTotal, m_numResistivityBlockTotal );
-
-		for( int iElem = 0; iElem < numElemTotal; ++iElem ){
-			fprintf(fp, "%10d%10d\n", iElem, m_elementID2blockID[iElem] );
+		if( failure != NULL ) {
+			OutputFiles::m_logFile << "# Warning: skipping sensitivity export " << fileName.str()
+				<< " for iteration " << iterNum << " (" << failure << ": " << strerror(savedErrno)
+				<< "). Any existing final file is unchanged and may be stale; inversion continues." << std::endl;
+			if( created && remove(temporary.c_str()) != 0 )
+				OutputFiles::m_logFile << "# Warning: could not remove incomplete temporary file " << temporary << std::endl;
 		}
-
-		const std::vector<double>& values = *specs[ifile].values;
-		for( int iBlk = 0; iBlk < m_numResistivityBlockTotal; ++iBlk ){
-			fprintf(fp, "%10d%5s%15e%15e%15e%15e%10d\n", iBlk, "     ",
-				values[iBlk], 0.0, 0.0, 0.0,
-				getTypeOfResistivityBlock(m_fixResistivityValues[iBlk], m_isolated[iBlk]) );
-		}
-
-		fclose(fp);
 	}
 
 }

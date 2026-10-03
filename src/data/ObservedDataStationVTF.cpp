@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-13).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -429,7 +430,6 @@ void ObservedDataStationVTF::outputCalculatedValues() const{
 
 #ifdef _HDF5_OUT
 // Collect this PE's calculated VTF values for results_iterN.h5.
-// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
 void ObservedDataStationVTF::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
 
 	int icount(0);
@@ -588,10 +588,10 @@ void ObservedDataStationVTF::collectErrorVectorThisPE( const double freq, const 
 	if( freqIDThisPEInSta < 0 ) return;
 	const int freqIDGlobalInSta = m_freqIDsAmongThisStationCalculatedByThisPE[ freqIDThisPEInSta ];
 
-	vector[ offset + m_dataIDOfTzx[freqIDThisPEInSta].realPart ] = m_TzxSD[freqIDGlobalInSta].realPart;
-	vector[ offset + m_dataIDOfTzx[freqIDThisPEInSta].imagPart ] = m_TzxSD[freqIDGlobalInSta].imagPart;
-	vector[ offset + m_dataIDOfTzy[freqIDThisPEInSta].realPart ] = m_TzySD[freqIDGlobalInSta].realPart;
-	vector[ offset + m_dataIDOfTzy[freqIDThisPEInSta].imagPart ] = m_TzySD[freqIDGlobalInSta].imagPart;
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfTzx[freqIDThisPEInSta].realPart, offset, m_TzxSD[freqIDGlobalInSta].realPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfTzx[freqIDThisPEInSta].imagPart, offset, m_TzxSD[freqIDGlobalInSta].imagPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfTzy[freqIDThisPEInSta].realPart, offset, m_TzySD[freqIDGlobalInSta].realPart, vector );
+	ObservedDataSDMaskingPolicy::writeResidual( m_dataIDOfTzy[freqIDThisPEInSta].imagPart, offset, m_TzySD[freqIDGlobalInSta].imagPart, vector );
 }
 
 #endif // _HDF5_JAC

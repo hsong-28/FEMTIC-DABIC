@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-11).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -21,12 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
-// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-21
-// (ported _HDF5_JAC Jacobian output from femtic_v4_src).
-// Further modified (fixed MPI_Gatherv deadlock in the _HDF5_JAC
-// Jacobian-output block, present whenever numProcessTotal > 1 — flagged as
-// a known limitation when this code was ported, now fixed) by Volker Rath
-// (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-09.
 #include "ObservedData.h"
 #include "AnalysisControl.h"
 #include "OutputFiles.h"

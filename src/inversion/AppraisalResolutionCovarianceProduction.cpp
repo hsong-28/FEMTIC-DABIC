@@ -1,8 +1,9 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
-// Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2026
+// Copyright (c) 2026 Han Song
+//
+// Resolution output by Volker Rath (DIAS; 2026-10-02).
 //-------------------------------------------------------------------------------------------------------
 #include "AppraisalResolutionCovarianceProduction.h"
 

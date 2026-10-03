@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Han Song
+// SPDX-License-Identifier: MIT
+
 #ifndef DBLDEF_DATA_FIT_COOLING_POLICY
 #define DBLDEF_DATA_FIT_COOLING_POLICY
 

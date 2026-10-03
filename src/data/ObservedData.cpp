@@ -3,6 +3,7 @@
 //
 // Copyright (c) 2021 Yoshiya Usui
 //
+// HDF5 support by Volker Rath (DIAS; 2026-08-05 to 2026-09-14).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -21,7 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
-// Modified by Volker Rath (DIAS) with the help of Claude Sonnet 5, 2026-08-05.
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -2495,7 +2495,6 @@ void ObservedData::outputDistortionParams( const int iterNum ) const{
 // Collect this PE's calculated response values across every station type,
 // for results_iterN.h5. Called on EVERY PE -- see FemticHDF5CalcTypes.h and
 // the MPI_Gatherv in AnalysisControl.cpp.
-// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic), 2026-09-13.
 void ObservedData::collectCalculatedValuesForHDF5( std::vector<FemticHDF5CalcRow>& rows ) const{
 
 	for( int i = 0; i < m_numStationsMT; ++i )
@@ -2856,8 +2855,6 @@ void ObservedData::outputInductionArrowToVtk( const int iterNum ) const{
 		// induction_arrow_*_iterN.vtk directly (unlike the other vtk
 		// writers, it does not go through OutputFiles::openVTKFile()), so
 		// it needs its own explicit guard.
-		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
-		// (Anthropic), 2026-09-14.
 		return;
 	}
 

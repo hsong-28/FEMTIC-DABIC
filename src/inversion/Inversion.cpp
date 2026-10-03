@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-08-21 to 2026-09-14).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -22,10 +26,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //-------------------------------------------------------------------------------------------------------
-// Modified (added assembleAndWriteJacobianToHDF5(), ported from
-// femtic_v4_src; see Inversion.h) by Volker Rath (DIAS) with the help of
-// Claude Sonnet 5 (Anthropic), 2026-09-11.
 #include "Inversion.h"
+#include <limits>
+#include <new>
 #include "ObservedData.h"
 #include "AnalysisControl.h"
 #include "OutputFiles.h"
@@ -1080,6 +1083,12 @@ void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
 	int* displacements = new int[ numProcessTotal + 1 ];
 	displacements[0] = 0;
 	for( int i = 0; i < numProcessTotal; ++i ){
+		if( numDataLocal[i] < 0 || numDataLocal[i] > std::numeric_limits<int>::max() - displacements[i] ){
+			if( myProcessID == 0 ) OutputFiles::m_logFile << "# Warning: invalid or overflowing HDF5 data count -- skipping exchange.h5." << std::endl;
+			delete [] numDataLocal;
+			delete [] displacements;
+			return; // All PEs have identical gathered counts.
+		}
 		displacements[i+1] = displacements[i] + numDataLocal[i];
 	}
 	const int numDataTotal = displacements[numProcessTotal];
@@ -1113,8 +1122,20 @@ void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
 	// concatenating them along the data axis therefore already yields the
 	// exact [numDataTotal][numModel] row-major layout outputJacobianToHDF5()
 	// writes to /jacobian -- no transpose is needed here.
-	double* jacRowMajor = new double[ numDataTotal_64 * numModel_64 ];
-	for( long long int i = 0; i < numDataTotal_64 * numModel_64; ++i ){
+	if( numModel <= 0 || numDataTotal <= 0 ||
+	    static_cast<size_t>(numDataTotal) > std::numeric_limits<size_t>::max() / sizeof(double) / static_cast<size_t>(numModel) ){
+		OutputFiles::m_logFile << "# Warning: invalid or overflowing Jacobian dimensions -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+		delete [] errVecTotal;
+		return;
+	}
+	const size_t numValues = static_cast<size_t>(numDataTotal) * static_cast<size_t>(numModel);
+	double* jacRowMajor = new(std::nothrow) double[numValues];
+	if( jacRowMajor == NULL ){
+		OutputFiles::m_logFile << "# Warning: cannot allocate the optional Jacobian buffer -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+		delete [] errVecTotal;
+		return;
+	}
+	for( size_t i = 0; i < numValues; ++i ){
 		jacRowMajor[i] = 0.0;
 	}
 
@@ -1178,8 +1199,14 @@ void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
 
 		int numDataThisFreq(0);
 		int numModelTemp(0);
-		fread( &numDataThisFreq, sizeof(int), 1, fp );
-		fread( &numModelTemp, sizeof(int), 1, fp );
+		if( fread( &numDataThisFreq, sizeof(int), 1, fp ) != 1 ||
+		    fread( &numModelTemp, sizeof(int), 1, fp ) != 1 ){
+			OutputFiles::m_logFile << "# Warning: incomplete sensitivity header in " << fileName.str()
+			                       << " -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+			fclose( fp );
+			ok = false;
+			break;
+		}
 		if( numModel != numModelTemp ){
 			OutputFiles::m_logFile << "# Warning: " << fileName.str()
 			                       << " has numModel=" << numModelTemp << ", expected " << numModel
@@ -1189,11 +1216,11 @@ void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
 			ok = false;
 			break;
 		}
-		if( numDataAccumulated_64 + static_cast<long long int>(numDataThisFreq) > numDataTotal_64 ){
+		if( numDataThisFreq < 0 || static_cast<long long int>(numDataThisFreq) > numDataTotal_64 - numDataAccumulated_64 ){
 			OutputFiles::m_logFile << "# Warning: " << fileName.str()
-			                       << " would overflow the assembled Jacobian buffer ("
-			                       << numDataAccumulated_64 << " + " << numDataThisFreq << " > "
-			                       << numDataTotal_64 << ") -- skipping the Jacobian dump for iteration "
+			                       << " has an invalid row count " << numDataThisFreq
+			                       << " with " << numDataTotal_64 - numDataAccumulated_64
+			                       << " rows remaining -- skipping the Jacobian dump for iteration "
 			                       << iterNum << " (the rest of the run is unaffected)." << std::endl;
 			fclose( fp );
 			ok = false;
@@ -1201,10 +1228,18 @@ void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
 		}
 
 		const long long int numDataThisFreq_64 = static_cast<long long int>(numDataThisFreq);
-		fread( &jacRowMajor[ numDataAccumulated_64 * numModel_64 ], sizeof(double),
-		       numDataThisFreq_64 * numModel_64, fp );
-
-		fclose( fp );
+		const size_t expected = static_cast<size_t>(numDataThisFreq) * static_cast<size_t>(numModel);
+		const size_t actual = fread( jacRowMajor + numDataAccumulated_64 * numModel_64,
+		                            sizeof(double), expected, fp );
+		const bool readFailed = ferror( fp ) != 0;
+		const int closeStatus = fclose( fp );
+		if( actual != expected || readFailed || closeStatus != 0 ){
+			OutputFiles::m_logFile << "# Warning: incomplete or failed sensitivity read in " << fileName.str()
+			                       << " (" << actual << " of " << expected << " values)"
+			                       << " -- skipping exchange.h5 for iteration " << iterNum << std::endl;
+			ok = false;
+			break;
+		}
 
 		numDataAccumulated_64 += numDataThisFreq_64;
 	}
@@ -1219,6 +1254,8 @@ void Inversion::assembleAndWriteJacobianToHDF5( const int iterNum ) const{
 
 	if( ok ){
 		outputJacobianToHDF5( iterNum, numDataTotal, numModel, jacRowMajor, errVecTotal );
+	} else {
+		OutputFiles::m_logFile << "# Warning: no new exchange.h5 was written; any existing file is from an earlier export. Inversion continues." << std::endl;
 	}
 
 	delete [] jacRowMajor;

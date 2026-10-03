@@ -35,10 +35,22 @@ Block / model indexing
 ----------------------
 Per-block arrays (``/model/blocks``, ``/model/sensitivity/*``) have length
 nBlocks and include fixed blocks (air, sea, other fixed regions); they are
-indexed by blockID as in ``/model/element_block_map``. The Jacobian columns
-and roughening-matrix rows/columns are indexed by modelID, i.e. the free
-blocks (type 0 or 3) in ascending blockID order;
-``FemticModel.model_to_block`` gives that mapping (isotropic runs).
+indexed by blockID as in ``/model/element_block_map``. In isotropic DABIC,
+the leading Jacobian columns correspond to free resistivity blocks (type
+0 or 3) in ascending blockID order; ``FemticModel.model_to_block`` maps
+only these columns. Any estimated distortion parameters follow them and
+are not resistivity blocks. The exported ``/rough`` matrix is the
+pre-degeneration nBlocks x nBlocks operator, including fixed blocks.
+It is not the weighted free-parameter regularization operator used by
+the solver: fixed-block terms, filter/IRLS weights, reference constraints,
+regularization weights and distortion penalties must be handled separately.
+Do not combine the raw export directly with J or assume matching dimensions.
+
+``exchange.h5`` describes the Jacobian's linearization iteration, recorded
+in ``/metadata`` and ``/jacobian/metadata``. It need not match the last
+results file; the scheduled final iteration is forward-only. Check the
+iteration attributes and run log before combining outputs. A failed export
+can leave a valid but stale file from an earlier run or iteration.
 
 When is sensitivity absent from results_iter<N>.h5?
 ----------------------------------------------------
@@ -62,34 +74,11 @@ just once per iteration). Files written before that fix may still hold
 the sum over all retrials tried that iteration; there is no way to tell
 the two cases apart from the file's contents alone.
 
-Provenance
-----------
-Author: Claude (Anthropic), for Volker Rath (DIAS).
-Generated: 2026-09-25 (rewrite; updated 2026-10-01 for exchange.h5; replaces the earlier multi-generation
-reader, which also covered the legacy ``model_iter<N>.h5`` /
-``data_iter<N>.h5`` files and the deprecated dabic v1.4/v1.5/v1.5.2 trees).
-AI-generated code: review and test before production use. Tested only
-against a minimal in-memory h5py stand-in built from the C++ writer's
-schema, not against a FEMTIC-written file.
+Contributor: Volker Rath (DIAS).
 
-Changelog
-~~~~~~~~~
-2026-10-01  (Claude Sonnet 5.5) jacobian.h5 / rough.h5 / mesh.h5 replaced
-            by the single exchange.h5. New ``read_exchange_hdf5`` and
-            ``FemticExchange``; ``read_jacobian_hdf5`` / ``read_rough_hdf5``
-            / ``read_mesh_hdf5`` now take the path of exchange.h5 and read
-            one group each. Not tested against a FEMTIC-written file
-            (h5py unavailable here; tested with an in-memory stand-in).
-2026-09-25  (Claude Opus 5.5) Documented the C++ fix (all three trees)
-            for the sensitivity-accumulation-across-retrials issue: see
-            "When is sensitivity absent" above. No reader code change --
-            the file layout is unaffected, only which model's values end
-            up in it.
-2026-09-25  (Claude Opus 5.5) Rewrite for the active trees only. Removed
-            legacy model/data and deprecated-tree layouts. Fixed
-            ``read_rough_hdf5`` (keys compared with a leading "/", never
-            matched) and ``read_jacobian_hdf5`` (metadata read from
-            ``/metadata``, not root attributes).
+Validation note: the original reader tests used an in-memory HDF5 stand-in,
+not solver-written files. Validate against representative solver outputs
+before production use. Legacy separate model/data file layouts are unsupported.
 """
 
 from __future__ import annotations
@@ -258,10 +247,10 @@ class FemticModel:
     @property
     def model_to_block(self) -> np.ndarray | None:
         """
-        (nModel,) blockID of each modelID (Jacobian column / roughening index):
-        free blocks in ascending blockID order, as assigned in
-        ResistivityBlock. None for anisotropic runs, where the model vector
-        is not one value per free block.
+        (nFreeResistivity,) blockID of each free resistivity parameter,
+        in ascending blockID order. These are the leading isotropic
+        Jacobian columns, not the appended distortion columns or the
+        all-block roughening indices. None for anisotropic runs.
         """
         if self.is_anisotropic:
             return None
@@ -426,11 +415,12 @@ def read_results_hdf5(path: str | Path, sens_fill: float | None = None) -> Femti
 class FemticJacobian:
     """
     ``/jacobian`` of ``exchange.h5``: the SD-weighted Jacobian
-    J = Cd^{-1/2} dF/dm of the last accepted iteration.
+    J = Cd^{-1/2} dF/dm at the exported linearization iteration.
 
     Rows follow the inversion's global data ordering (PE-gathered), which
     is NOT the row order of ``/data/data`` in results_iter<N>.h5. Columns
-    are modelIDs (see ``FemticModel.model_to_block``).
+    contain free resistivity modelIDs followed by any estimated distortion
+    parameters. ``FemticModel.model_to_block`` maps only the resistivity part.
     """
 
     J: np.ndarray                 # (nData, nModel), SD-weighted
@@ -577,8 +567,10 @@ def read_jacobian_hdf5(path: str | Path) -> FemticJacobian:
 def read_rough_hdf5(path: str | Path):
     """
     Read only ``/rough`` of ``exchange.h5`` (roughening matrix R,
-    nModel x nModel, CSR). Returns a ``scipy.sparse.csr_matrix``, or a dict
-    of the raw CSR arrays if scipy is not installed.
+    nBlocks x nBlocks, CSR, before fixed-block degeneration in DABIC).
+    Returns a ``scipy.sparse.csr_matrix``, or a dict of the raw CSR arrays
+    if scipy is not installed. This is not the solver's weighted model-space
+    regularization operator.
     """
     with h5py.File(path, "r") as f:
         return _read_rough_group(_open_group(f, "rough", path), f"{path}:/rough")

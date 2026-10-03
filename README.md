@@ -20,7 +20,8 @@ Current release: **v2.7.0**.
 - optional reference-model/minimum-norm constraints and galvanic distortion
   estimation;
 - optional Levenberg-Marquardt damping for stabilizing model updates;
-- model-resolution and covariance-diagonal appraisal.
+- model-resolution and covariance-diagonal appraisal;
+- optional HDF5 model, response, Jacobian, and roughening-matrix output.
 
 ## Documentation
 
@@ -46,6 +47,18 @@ The executable is generated as:
 ```text
 src/femtic-dabic
 ```
+
+`src/Makefile` is the only build entry point. HDF5 and input-file remapping
+are optional and disabled by default:
+
+```bash
+make HDF5_OUT=yes HDF5_JAC=yes
+make HDF5_OUT=yes HDF5_JAC=yes INPUT_FILE_MAP=yes
+```
+
+Both commands build `femtic-dabic_h5_results_exchange.x`. HDF5 builds require
+the HDF5 development library; writing files additionally requires the
+corresponding `control.dat` switches. See [HDF5 build and output options](src/README_hdf5.md).
 
 ## Minimal Run
 
@@ -113,6 +126,12 @@ Full inversion outputs, debug runs, and server scratch directories are not
 included in the GitHub source release.
 
 ## Release Note
+
+**Maintenance update, Oct. 3, 2026:** Integrated Volker Rath's HDF5 output
+and Python readers, optional input-file mapping, control-file enhancements,
+sensitivity exports, and signed model-resolution diagonal correction.
+Follow-up maintenance unifies the Makefile, validates control inputs, and
+checks optional exports while retaining the existing output formats.
 
 ***v2.7*** Aug. 3, 2026: Simplified the ABIC interface while preserving the
 bracket-only inexact workflow and same-alpha reduced-step retry.
@@ -191,6 +210,10 @@ FEMTIC-DABIC is distributed under the MIT License. See [LICENSE](LICENSE).
 
 - Original FEMTIC source: Copyright (c) 2021 Yoshiya Usui
 - FEMTIC-DABIC modifications: Copyright (c) 2025-2026 Han Song
+
+[Volker Rath](https://github.com/volkerrath) (DIAS) contributed the HDF5 and
+related workflow extensions described above. His original commits and
+file-level attribution are retained.
 
 Files derived from upstream FEMTIC retain the original attribution. External
 dependencies, including MPI and Intel oneAPI/MKL, are governed by their own

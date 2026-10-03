@@ -1,3 +1,10 @@
+// Original FEMTIC source:
+// Copyright (c) 2021 Yoshiya Usui
+//
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+// SPDX-License-Identifier: MIT
+
 /* -------------------------------------------------------------------------------------------------------
  * FEMTIC-DABIC OCCAM line-search member definitions split from AnalysisControl.cpp.
  * This file restores the legacy v1.0 OCCAM search helpers and the minimal

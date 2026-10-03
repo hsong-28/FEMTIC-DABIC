@@ -1,9 +1,13 @@
 //-------------------------------------------------------------------------------------------------------
 // The MIT License (MIT)
 //
+// Original FEMTIC source:
 // Copyright (c) 2021 Yoshiya Usui
-// Modified by Han Song (c) 2025
 //
+// FEMTIC-DABIC modifications and extensions:
+// Copyright (c) 2025-2026 Han Song
+//
+// HDF5 support by Volker Rath (DIAS; 2026-09-14).
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -64,8 +68,6 @@ void OutputFiles::openVTKFile(const int iterNum)
 		// don't: writing to a closed std::ofstream is a well-defined,
 		// silent no-op, never a crash) safely produce nothing, with no
 		// changes needed anywhere else.
-		// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
-		// (Anthropic), 2026-09-14.
 		return;
 	}
 
@@ -162,8 +164,6 @@ void OutputFiles::openCsvFileFor2DFwd(const int iterNum)
 	// file is not an option here: it would leave m_csvFileFor2DFwd NULL and
 	// crash the first fprintf(). Redirecting to the null device instead
 	// keeps every one of those call sites completely unchanged and safe.
-	// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5
-	// (Anthropic), 2026-09-14.
 	const std::string target = (AnalysisControl::getInstance())->suppressCsvVtkOutput()
 	                            ? "/dev/null" : fileName;
 

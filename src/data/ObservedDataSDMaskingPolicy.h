@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Han Song
+// SPDX-License-Identifier: MIT
+
 #ifndef DBLDEF_OBSERVED_DATA_SD_MASKING_POLICY
 #define DBLDEF_OBSERVED_DATA_SD_MASKING_POLICY
 

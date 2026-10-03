@@ -1,6 +1,6 @@
 # FEMTIC-DABIC v2.7 — Modifications
 
-**Modified by:** Volker Rath (DIAS) with the help of Claude.
+Published release notes are maintained in [README.md](../README.md#release-note).
 
 This file documents the extensions made to FEMTIC-DABIC v2.7 (ABIC-based
 regularization search by Han Song, cross-gradient/`ConstrainingModel`
@@ -24,13 +24,24 @@ ecosystem, including cross-tree parity notes for `femtic_v4_src` and
 
 ## 0. Building
 
-The Makefile is `Makefile_hdf5` (renamed 2026-10-01); use `make -f
-Makefile_hdf5 ...`, or copy/symlink it to `Makefile`.
+`Makefile` is the only build entry point; replace earlier
+`make -f Makefile_hdf5 ...` commands with
+`make ...`. HDF5 and input-file remapping are disabled by default.
 
 ```bash
-make -f Makefile_hdf5          # release build
-make -f Makefile_hdf5 debug    # debug build, same toolchain
+make          # release build: femtic-dabic
+make debug    # debug build, same toolchain
 ```
+
+On Ubuntu, optional HDF5 builds need `libhdf5-dev` and `pkg-config`;
+`hdf5-tools` provides `h5dump` for inspecting output files:
+
+```bash
+sudo apt-get install libhdf5-dev pkg-config hdf5-tools
+```
+
+The default build does not require HDF5. The current writer uses serial HDF5
+on MPI rank 0; a parallel-HDF5 installation is not required.
 
 Requires Intel oneAPI 2024.0 or later: the compiler-agnostic MPI wrapper
 `mpiicpx` (invoking the LLVM-based `icpx`) is used for `CXX` and `CC`.
@@ -44,7 +55,7 @@ one oneAPI was validated against, set
 (no flag is passed by default):
 
 ```bash
-make -f Makefile_hdf5 GCC_INSTALL_DIR=/usr/lib/gcc/x86_64-linux-gnu/14
+make GCC_INSTALL_DIR=/usr/lib/gcc/x86_64-linux-gnu/14
 ```
 
 `MKL_ILP64` is always used (all MKL/LAPACK integers passed to
@@ -57,7 +68,7 @@ at a real ILP64 MKL installation before you try a full build — useful
 after moving to a new machine. `make print-config` echoes every relevant
 variable (`CXX`, `CC`, `GCC_INSTALL_DIR`, `MKLROOT`, `INPUT_FILE_MAP`, the
 `HDF5_*` flags, and the final `CXXFLAGS`/`DEBUG_CXXFLAGS`) without building
-anything. (Both targets also need `-f Makefile_hdf5`.)
+anything.
 
 ### Other build targets
 
@@ -76,15 +87,18 @@ make clean               # removes build/ and both PROGRAM binaries
 
 **Added:** 2026-08-05.
 
-`control.dat` (and the other FEMTIC-DABIC input files) can use `#` to start
-a comment — either a whole comment line, or trailing text after real
-content on the same line — instead of requiring every line to be pure
-data. `control.dat` parsing is also order-independent (each keyword is
-located by a `seekKeyword`-style lookup rather than a strict top-to-bottom
-sequential read), so blocks can appear in any order, with one exception:
-blocks with a genuine runtime dependency on another block having already
-run (e.g. `PARAM_DISTORTION` depending on `DISTORTION` having set the
-distortion type) must still appear in a compatible relative order.
+`control.dat` accepts whole comment lines starting with `#`, including
+indented lines. Put comments on separate lines, not after parameter values.
+Blocks can appear in any order in the file, but the program processes them
+in a fixed dependency order. For example, `DISTORTION` is processed before
+`WEIGHT_OF_DISTORTION`, because the distortion type determines how many
+weight values must be read. The same rule applies to trade-off type and
+parameters, reference type and constraints, and inversion method and search
+options. Required parent keywords must still be present.
+
+Duplicate keywords, unknown entries and unconsumed extra values are errors.
+Reading stops at `END`; following content is ignored. This validation does
+not change the existing parameter values or dependency order.
 
 On top of that, FEMTIC-DABIC's hard-coded input file names can be
 overridden at run time, without touching the source, by placing an
@@ -107,12 +121,12 @@ initial = resistivity_block_iter000_restart.dat
 
 | Flag | Preprocessor define |
 |---|---|
-| `INPUT_FILE_MAP=yes` (default) | `-D_INPUT_FILE_MAP` |
-| `INPUT_FILE_MAP=no` | feature compiled out entirely |
+| `INPUT_FILE_MAP=yes` | `-D_INPUT_FILE_MAP` |
+| `INPUT_FILE_MAP=no` (default) | runtime filename remapping disabled |
 
 ```bash
-make                         # feature enabled (default)
-make INPUT_FILE_MAP=no       # feature compiled out entirely
+make                         # filename remapping disabled (default)
+make INPUT_FILE_MAP=yes       # enable filename remapping
 ```
 
 ### Source files
@@ -152,10 +166,11 @@ That is now decided in `control.dat`, no longer by the build:
 | `ACTIVATE_HDF5_EXCHANGE` | `HDF5_JAC=yes` | write `exchange.h5` (last scheduled iteration or on convergence, as below) |
 
 ```
-# control.dat (any position; the order of keywords does not matter)
-ACTIVATE_HDF5_RESULTS            # keyword alone switches the feature on
-ACTIVATE_HDF5_EXCHANGE 1         # explicit 1 (on) or 0 (off) is also accepted,
-                                 # on the same line or the next one
+# control.dat (before END)
+# A keyword alone switches the feature on.
+ACTIVATE_HDF5_RESULTS
+# Explicit 1 (on) or 0 (off), on the same line or the next line.
+ACTIVATE_HDF5_EXCHANGE 1
 ```
 
 - Both keywords are optional and default to **off**. A binary built with
@@ -190,11 +205,37 @@ make HDF5_OUT=yes HDF5_JAC=yes
 make HDF5_JAC=yes
 ```
 
-The Makefile is now named `Makefile_hdf5`: build with
-`make -f Makefile_hdf5 HDF5_JAC=yes ...` (or copy/symlink it to `Makefile`).
+The default executable is `femtic-dabic`. HDF5 builds retain the feature
+suffixes: `femtic-dabic_h5_results.x`, `femtic-dabic_h5_exchange.x`, or
+`femtic-dabic_h5_results_exchange.x`. Add `INPUT_FILE_MAP=yes` when filename
+remapping is also needed. Run configuration changes sequentially; use separate
+source/build directories for concurrent builds.
 
 `HDF5_ROUGH=yes` / `HDF5_MESH=yes` no longer exist; passing either prints a
 Makefile warning and enables `HDF5_JAC` instead.
+
+### Export failure handling (2026-10-03)
+
+- For raw MT and VTF, `exchange.h5` contains only active scalar data
+  (`SD > 0`), in the same order as the residual and Jacobian rows. Real
+  and imaginary parts are masked independently. The results file still
+  preserves observed values and their original SDs.
+- The optional Jacobian assembler checks header dimensions and complete
+  payload reads. An invalid, missing or truncated sensitivity file skips
+  that export with a warning; the solver's mandatory reads are unchanged.
+- HDF5 creation, writes and closes are checked. Output is first written to
+  `<filename>.tmp`, then published under its usual filename only after a
+  successful close. Export failures warn and let the inversion continue.
+  Dataset names, shapes and numerical conventions are unchanged.
+- A failed export leaves any previous final file unchanged, not current.
+  Check the log and `iterNum` attributes before using it. Existing temporary
+  paths are not overwritten or removed; investigate leftovers before retrying.
+  Replacing a large exchange file temporarily requires space for both copies.
+- The optional `sensitivity_iterN.dat` and `sensitivity_normalized_iterN.dat`
+  exports use the same publish-after-close policy, independently of each
+  other. Create/write/flush/close/rename failures warn and continue the
+  inversion, preserving any old final file. Existing `.tmp` paths are not
+  overwritten. This does not change mandatory model or sensitivity-matrix I/O.
 
 ### `exchange.h5`: jacobian + rough + mesh in one file (2026-10-01)
 
@@ -221,6 +262,19 @@ writers; their content now lives in the corresponding group of `exchange.h5`.
                                 neighborFormat [, nNeighborElem]
 /mesh/node_coords|elem_nodes|neighbor_elements [|neighbor_face_ptr]
 ```
+
+In isotropic DABIC, the leading Jacobian columns are free resistivity
+parameters; estimated distortion parameters follow them. In contrast,
+`/rough` is the all-block operator before fixed-block degeneration. It
+includes fixed blocks and is not the solver's weighted regularization
+operator. Mapping, fixed-block terms, filter/IRLS weights, reference terms
+and distortion penalties must be handled separately; the two raw matrices
+cannot be combined directly. See the Python reader's indexing section.
+
+The exchange iteration is the Jacobian's linearization state. In a run
+from 0 to N, a scheduled exchange at N-1 is not the Jacobian of the
+forward-only final model N. Check both iteration metadata and run logs;
+an early exit or failed export may leave an older file, or no file.
 
 Changes versus the four-flag layout:
 
@@ -272,26 +326,14 @@ run — a log note is printed in this case.
 
 ### `_OCCAM`, `_LCurve`, and `_ABIC` trade-off-parameter search variants
 
-Unlike the base `InversionGaussNewtonDataSpace.cpp`/
-`InversionGaussNewtonModelSpace.cpp` (which have direct v4/v5 counterparts
-this port was modeled on), v2.7's `_OCCAM`, `_LCurve`, and `_ABIC`
-inversion variants (`inversion/InversionGaussNewtonDataSpace_OCCAM.cpp`,
-`InversionGaussNewtonDataSpaceLCurve.cpp`,
-`InversionGaussNewtonDataSpace_ABIC.cpp`) search over many trade-off-
-parameter candidates per outer iteration — each candidate triggers its own
-`inversionCalculation()` call — before settling on one. Each of these three
-files does have a `jacobian.h5` hook (ported 2026-08-22), and as of
-2026-08-30 all of their many per-candidate calls (routed through
-`control/AnalysisControlOCCAMLineSearch.cpp` for OCCAM, and directly
-through `control/AnalysisControl.cpp` for ABIC/L-curve) share the same
-"only on the last outer iteration" flag as the base Gauss-Newton path.
-During that final outer iteration, `jacobian.h5` gets harmlessly
-overwritten by each trial candidate in turn and ends up holding whichever
-one was evaluated last — there is no way to single out "the winning
-candidate's Jacobian" without deeper changes to each search algorithm, so
-this is a known imprecision for these three variants specifically (not
-present in the plain Gauss-Newton `TO_Fixed` path, where every call
-corresponds to the actual accepted update).
+These methods may evaluate multiple candidates per outer iteration. The
+current exchange writer is called from `AnalysisControl::run()` after a
+successful retrial, before method-specific candidate dispatch, subject to
+the scheduling rule above. It exports the raw sensitivity files for that
+linearization state, not whichever candidate happened to be evaluated last.
+The older per-candidate `jacobian.h5` behavior no longer describes this
+implementation. Use `/metadata/iterNum`, `/jacobian/metadata/iterNum` and
+the accepted-state log to identify the exported state.
 
 ### Fixed: MPI_Allreduce deadlock in `model_iterX.h5` sensitivity output (2026-09-09)
 

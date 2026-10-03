@@ -12,10 +12,7 @@
 // Kept deliberately dependency-free (no hdf5.h, no mpi.h, no FEMTIC headers
 // beyond nothing) so it is cheap to include from every station header.
 //
-// Added by Volker Rath (DIAS) with the help of Claude Sonnet 5 (Anthropic),
-// 2026-09-13, as part of merging model_iterX.h5 + data_iterX.h5 +
-// distortion_iterX.dat into a single results_iterX.h5 and adding calculated
-// (as opposed to only observed) response values to /data.
+// HDF5 support by Volker Rath (DIAS; 2026-09-13).
 //-------------------------------------------------------------------------------------------------------
 #ifndef DBLDEF_FEMTIC_HDF5_CALC_TYPES
 #define DBLDEF_FEMTIC_HDF5_CALC_TYPES
