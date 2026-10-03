@@ -2,6 +2,8 @@
 
 Published release notes are maintained in [README.md](../README.md#release-note).
 
+HDF5 and workflow extensions contributed by Volker Rath (DIAS).
+
 This file documents the extensions made to FEMTIC-DABIC v2.7 (ABIC-based
 regularization search by Han Song, cross-gradient/`ConstrainingModel`
 features by Dieno Diba and Han Song, on top of Yoshiya Usui's original
