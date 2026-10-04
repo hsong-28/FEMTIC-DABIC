@@ -15,7 +15,7 @@ Current release: **v2.7.1**.
   cubic-spline L-curve inversion;
 - configurable regularization, reference-model constraints, and galvanic
   distortion correction;
-- model-resolution and covariance-diagonal appraisal(Experimental; further testing in progress);
+- linearized model-resolution and uncertainty appraisal (experimental; further testing in progress);
 - optional HDF5 export of resistivity models, predicted responses, the
   data-weighted Jacobian, and the roughening matrix.
 
