@@ -1,27 +1,23 @@
 # FEMTIC-DABIC
 
 FEMTIC-DABIC is a 3-D magnetotelluric (MT) inversion program
-derived from [FEMTIC](https://github.com/yoshiya-usui/femtic). Its principal
-inversion method is a data-space variant of Akaike's Bayesian Information
-Criterion (D-DABIC); OCCAM and nonlinear cubic-spline L-curve inversion are
-also supported, together with L2, L1-style, and L0-style regularization.
+derived from [FEMTIC](https://github.com/yoshiya-usui/femtic). It uses a data-space
+variant of Akaike's Bayesian Information Criterion (DABIC) for statistically
+guided selection of the regularization parameter and model. OCCAM and nonlinear
+cubic-spline L-curve inversion offer alternative paths.
 
 Current release: **v2.7.1**.
 
 ## Main Features
 
-- 3-D MT forward modeling and mesh discretization based on FEMTIC;
-- exact and inexact D-DABIC/ABIC inversion;
-- exact and inexact OCCAM inversion;
-- nonlinear cubic-spline L-curve inversion;
-- L2, L1-style, and L0-style regularization with Difference-filter support;
-- Laplacian L2 roughness as an alternative to the Difference filter;
-- fixed-alpha, linear L-curve, and data-fit cooling as additional modes;
-- optional reference-model/minimum-norm constraints and galvanic distortion
-  estimation;
-- optional Levenberg-Marquardt damping for stabilizing model updates;
+- FEMTIC-based 3-D MT forward modeling and mesh support;
+- DABIC/ABIC and OCCAM inversion with exact and inexact options, plus
+  cubic-spline L-curve inversion;
+- configurable regularization, reference-model constraints, and galvanic
+  distortion correction;
 - model-resolution and covariance-diagonal appraisal;
-- optional HDF5 model, response, Jacobian, and roughening-matrix output.
+- optional HDF5 export of resistivity models, predicted responses, the
+  data-weighted Jacobian, and the roughening matrix.
 
 ## Documentation
 
@@ -169,7 +165,7 @@ FEMTIC-DABIC is a maintained derivative of Yoshiya Usui's FEMTIC, not an
 independent or clean-room implementation. FEMTIC provides the underlying mesh,
 data, forward-modeling, inversion, sparse-linear-algebra, solver, and native
 I/O architecture. FEMTIC-DABIC adds and maintains the D-DABIC/ABIC, OCCAM,
-L-curve, Lp regularization, appraisal, reporting, and workflow extensions.
+L-curve, appraisal, reporting, and workflow extensions.
 
 ## License and Attribution
 
