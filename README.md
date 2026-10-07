@@ -13,8 +13,7 @@ Current release: **v2.7.1**.
 - FEMTIC-based 3-D MT forward modeling and mesh support;
 - DABIC/ABIC and OCCAM inversion with exact and inexact options, plus
   cubic-spline L-curve inversion;
-- configurable regularization, reference-model constraints, and galvanic
-  distortion correction;
+- optional reference-model constraints;
 - linearized model-resolution and uncertainty appraisal (experimental; further testing in progress);
 - optional HDF5 export of resistivity models, predicted responses, the
   data-weighted Jacobian, and the roughening matrix.
